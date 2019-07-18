@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cryptofuzz/components.h>
+#include <cryptofuzz/repository.h>
 #include <fuzzing/datasource/datasource.hpp>
 
 namespace cryptofuzz {
@@ -16,7 +17,11 @@ class Operation {
             modifier(std::move(modifier))
         { }
 
+        virtual std::string Name(void) const = 0;
         virtual std::string ToString(void) const = 0;
+        virtual std::string GetAlgorithmString(void) const {
+            return "(no algorithm)";
+        }
 };
 
 class Digest : public Operation {
@@ -30,7 +35,11 @@ class Digest : public Operation {
             digestType(ds)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
+        std::string GetAlgorithmString(void) const override {
+            return repository::DigestToString(digestType.Get());
+        }
 };
 
 class HMAC : public Operation {
@@ -46,7 +55,11 @@ class HMAC : public Operation {
             cipher(ds)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
+        std::string GetAlgorithmString(void) const override {
+            return repository::DigestToString(digestType.Get());
+        }
 };
 
 class SymmetricEncrypt : public Operation {
@@ -69,7 +82,11 @@ class SymmetricEncrypt : public Operation {
                     std::make_optional<uint64_t>(ds.Get<uint64_t>() % (10*1024*1024)) )
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
+        std::string GetAlgorithmString(void) const override {
+            return repository::CipherToString(cipher.cipherType.Get());
+        }
 };
 
 class SymmetricDecrypt : public Operation {
@@ -91,7 +108,11 @@ class SymmetricDecrypt : public Operation {
         { }
         SymmetricDecrypt(const SymmetricEncrypt& opSymmetricEncrypt, const component::Ciphertext ciphertext, const uint64_t cleartextSize, std::optional<component::AAD> aad, component::Modifier modifier);
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
+        std::string GetAlgorithmString(void) const override {
+            return repository::CipherToString(cipher.cipherType.Get());
+        }
 };
 
 class KDF_SCRYPT : public Operation {
@@ -109,11 +130,12 @@ class KDF_SCRYPT : public Operation {
             password(ds),
             salt(ds),
             N(ds.Get<uint64_t>() % 5),
-            r(ds.Get<uint64_t>() % 5),
+            r(ds.Get<uint64_t>() % 9),
             p(ds.Get<uint64_t>() % 5),
-            keySize(ds.Get<uint64_t>() % (10*1024*1024))
+            keySize(ds.Get<uint64_t>() % 1024)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 
@@ -132,9 +154,10 @@ class KDF_HKDF : public Operation {
             password(ds),
             salt(ds),
             info(ds),
-            keySize(ds.Get<uint64_t>() % (10*1024*1024))
+            keySize(ds.Get<uint64_t>() % 1024)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 
@@ -151,9 +174,10 @@ class KDF_TLS1_PRF : public Operation {
             digestType(ds),
             secret(ds),
             seed(ds),
-            keySize(ds.Get<uint64_t>() % (10*1024*1024))
+            keySize(ds.Get<uint64_t>() % 1024)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 
@@ -172,9 +196,10 @@ class KDF_PBKDF2 : public Operation {
             password(ds),
             salt(ds),
             iterations(ds.Get<uint64_t>() % 5),
-            keySize(ds.Get<uint64_t>() % (10*1024*1024))
+            keySize(ds.Get<uint64_t>() % 1024)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 
@@ -189,6 +214,7 @@ class CMAC : public Operation {
             cipher(ds)
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 
@@ -208,6 +234,7 @@ class Sign : public Operation {
             signatureSize(ds.Get<uint64_t>() % (10*1024*1024))
         { }
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 
@@ -227,6 +254,7 @@ class Verify : public Operation {
         { }
         Verify(const Sign& opSign, const component::Signature signature, component::Modifier modifier);
 
+        std::string Name(void) const override;
         std::string ToString(void) const override;
 };
 

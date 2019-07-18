@@ -45,13 +45,24 @@
   #include <modules/libgcrypt/module.h>
 #endif
 
+#if defined(CRYPTOFUZZ_EVERCRYPT)
+  #include <modules/evercrypt/module.h>
+#endif
+
 std::shared_ptr<cryptofuzz::Driver> driver = nullptr;
 
 extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
-    (void)argc;
-    (void)argv;
+    bool debug = false;
 
-    driver = std::make_shared<cryptofuzz::Driver>();
+    for (int i = 1; i < *argc; i++) {
+        const std::string arg((*argv)[i]);
+
+        if ( arg == "--debug") {
+            debug = true;
+        }
+    }
+
+    driver = std::make_shared<cryptofuzz::Driver>(debug);
 
     driver->LoadModule( std::make_shared<cryptofuzz::module::OpenSSL>() );
 
@@ -93,6 +104,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 #if defined(CRYPTOFUZZ_LIBGCRYPT)
     driver->LoadModule( std::make_shared<cryptofuzz::module::libgcrypt>() );
+#endif
+
+#if defined(CRYPTOFUZZ_EVERCRYPT)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::EverCrypt>() );
 #endif
     return 0;
 }

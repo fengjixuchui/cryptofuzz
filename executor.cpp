@@ -2,6 +2,7 @@
 #include "tests.h"
 #include <cryptofuzz/util.h>
 #include <fuzzing/memory.hpp>
+#include <algorithm>
 
 extern "C" {
 //__attribute__((section("__libfuzzer_extra_counters")))
@@ -92,6 +93,7 @@ template<> void ExecutorBase<component::Ciphertext, operation::SymmetricEncrypt>
 
         switch ( op.cipher.cipherType.Get() ) {
             case    ID("Cryptofuzz/Cipher/AES_128_OCB"):
+            case    ID("Cryptofuzz/Cipher/AES_256_OCB"):
 
             case    ID("Cryptofuzz/Cipher/AES_128_GCM"):
             case    ID("Cryptofuzz/Cipher/AES_192_GCM"):
@@ -139,7 +141,12 @@ template<> void ExecutorBase<component::Ciphertext, operation::SymmetricEncrypt>
                 printf("Operation:\n%s\n", op.ToString().c_str());
                 printf("Ciphertext: %s\n", util::HexDump(result.second->ciphertext.Get()).c_str());
                 printf("Tag: %s\n", result.second->tag ? util::HexDump(result.second->tag->Get()).c_str() : "nullopt");
-                abort();
+                abort(
+                        {module->name},
+                        op.Name(),
+                        op.GetAlgorithmString(),
+                        "cannot decrypt ciphertext"
+                );
             } else if ( cleartext->Get() != op.cleartext.Get() ) {
                 /* Decryption ostensibly succeeded, but the cleartext returned by OpSymmetricDecrypt()
                  * does not match to original cleartext */
@@ -149,7 +156,12 @@ template<> void ExecutorBase<component::Ciphertext, operation::SymmetricEncrypt>
                 printf("Ciphertext: %s\n", util::HexDump(result.second->ciphertext.Get()).c_str());
                 printf("Tag: %s\n", result.second->tag ? util::HexDump(result.second->tag->Get()).c_str() : "nullopt");
                 printf("Purported cleartext: %s\n", util::HexDump(cleartext->Get()).c_str());
-                abort();
+                abort(
+                        {module->name},
+                        op.Name(),
+                        op.GetAlgorithmString(),
+                        "cannot decrypt ciphertext"
+                );
             }
         }
     }
@@ -322,9 +334,10 @@ template<> std::optional<bool> ExecutorBase<bool, operation::Verify>::callModule
 }
 
 template <class ResultType, class OperationType>
-ExecutorBase<ResultType, OperationType>::ExecutorBase(const uint64_t operationID, const std::map<uint64_t, std::shared_ptr<Module> >& modules) :
+ExecutorBase<ResultType, OperationType>::ExecutorBase(const uint64_t operationID, const std::map<uint64_t, std::shared_ptr<Module> >& modules, const bool debug) :
     operationID(operationID),
-    modules(modules)
+    modules(modules),
+    debug(debug)
 {
 }
 
@@ -377,9 +390,28 @@ void ExecutorBase<ResultType, OperationType>::compare(const ResultSet& results, 
             printf("Module %s result:\n\n%s\n\n", filtered[i-1].first->name.c_str(), util::ToString(*prev).c_str());
             printf("Module %s result:\n\n%s\n\n", filtered[i].first->name.c_str(), util::ToString(*cur).c_str());
 
-            abort();
+            abort(
+                    {filtered[i-1].first->name.c_str(), filtered[i].first->name.c_str()},
+                    op.Name(),
+                    op.GetAlgorithmString(),
+                    "difference"
+            );
         }
     }
+}
+
+template <class ResultType, class OperationType>
+void ExecutorBase<ResultType, OperationType>::abort(std::vector<std::string> moduleNames, const std::string operation, const std::string algorithm, const std::string reason) const {
+    std::sort(moduleNames.begin(), moduleNames.end());
+
+    printf("Assertion failure: ");
+    for (const auto& moduleName : moduleNames) {
+        printf("%s-", moduleName.c_str());
+    }
+    printf("%s-%s-%s\n", operation.c_str(), algorithm.c_str(), reason.c_str());
+    fflush(stdout);
+
+    ::abort();
 }
 
 template <class ResultType, class OperationType>
@@ -441,7 +473,7 @@ void ExecutorBase<ResultType, OperationType>::Run(Datasource& parentDs, const ui
 
 
     /* Enable this to run every operation on every loaded module */
-#if 0
+#if 1
     {
         std::vector< std::pair<std::shared_ptr<Module>, OperationType> > newOperations;
 
@@ -486,6 +518,10 @@ void ExecutorBase<ResultType, OperationType>::Run(Datasource& parentDs, const ui
                     }
                 }
             }
+        }
+
+        if ( debug == true ) {
+            printf("Running:\n%s\n", op.ToString().c_str());
         }
 
         results.push_back( {module, std::move(callModule(module, op))} );

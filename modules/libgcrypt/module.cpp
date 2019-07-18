@@ -14,46 +14,58 @@ libgcrypt::libgcrypt(void) :
     gcry_control(GCRYCTL_DISABLE_SECMEM_WARN, 0);
 }
 
+namespace libgcrypt_detail {
+
+    std::optional<int> DigestIDToID(const uint64_t digestType) {
+        static const std::map<uint64_t, int> LUT = {
+            { CF_DIGEST("SHA1"), GCRY_MD_SHA1 },
+            { CF_DIGEST("SHA224"), GCRY_MD_SHA224 },
+            { CF_DIGEST("SHA256"), GCRY_MD_SHA256 },
+            { CF_DIGEST("SHA384"), GCRY_MD_SHA384 },
+            { CF_DIGEST("SHA512"), GCRY_MD_SHA512 },
+            { CF_DIGEST("MD4"), GCRY_MD_MD4 },
+            { CF_DIGEST("MD5"), GCRY_MD_MD5 },
+            { CF_DIGEST("RIPEMD160"), GCRY_MD_RMD160 },
+            { CF_DIGEST("WHIRLPOOL"), GCRY_MD_WHIRLPOOL },
+            { CF_DIGEST("BLAKE2B160"), GCRY_MD_BLAKE2B_160 },
+            { CF_DIGEST("BLAKE2B256"), GCRY_MD_BLAKE2B_256 },
+            { CF_DIGEST("BLAKE2B384"), GCRY_MD_BLAKE2B_384 },
+            { CF_DIGEST("BLAKE2B512"), GCRY_MD_BLAKE2B_512 },
+            { CF_DIGEST("BLAKE2S128"), GCRY_MD_BLAKE2S_128 },
+            { CF_DIGEST("BLAKE2S160"), GCRY_MD_BLAKE2S_160 },
+            { CF_DIGEST("BLAKE2S224"), GCRY_MD_BLAKE2S_224 },
+            { CF_DIGEST("BLAKE2S256"), GCRY_MD_BLAKE2S_256 },
+            { CF_DIGEST("SHAKE128"), GCRY_MD_SHAKE128 },
+            { CF_DIGEST("SHAKE256"), GCRY_MD_SHAKE256 },
+            { CF_DIGEST("SHA3-224"), GCRY_MD_SHA3_224 },
+            { CF_DIGEST("SHA3-256"), GCRY_MD_SHA3_256 },
+            { CF_DIGEST("SHA3-384"), GCRY_MD_SHA3_384 },
+            { CF_DIGEST("SHA3-512"), GCRY_MD_SHA3_512 },
+            { CF_DIGEST("STREEBOG-256"), GCRY_MD_STRIBOG256 },
+            { CF_DIGEST("STREEBOG-512"), GCRY_MD_STRIBOG512 },
+            { CF_DIGEST("TIGER"), GCRY_MD_TIGER1 },
+            { CF_DIGEST("GOST-R-34.11-94"), GCRY_MD_GOSTR3411_CP },
+
+            /* All CRCs currently disabled due to somewhat difficult
+             * to reproduce mismatches/garbage output.
+             */
+#if 0
+            { CF_DIGEST("CRC32"), GCRY_MD_CRC32 },
+            { CF_DIGEST("CRC32-RFC1510"), GCRY_MD_CRC32_RFC1510 },
+            { CF_DIGEST("CRC32-RFC2440"), GCRY_MD_CRC24_RFC2440 },
+#endif
+        };
+
+        std::optional<int> ret = std::nullopt;
+
+        CF_CHECK_NE(LUT.find(digestType), LUT.end());
+        ret = LUT.at(digestType);
+end:
+        return ret;
+    }
+} /* namespace libgcrypt_detail */
 
 std::optional<component::Digest> libgcrypt::OpDigest(operation::Digest& op) {
-    static const std::map<uint64_t, int> LUT = {
-        { CF_DIGEST("SHA1"), GCRY_MD_SHA1 },
-        { CF_DIGEST("SHA224"), GCRY_MD_SHA224 },
-        { CF_DIGEST("SHA256"), GCRY_MD_SHA256 },
-        { CF_DIGEST("SHA384"), GCRY_MD_SHA384 },
-        { CF_DIGEST("SHA512"), GCRY_MD_SHA512 },
-        { CF_DIGEST("MD4"), GCRY_MD_MD4 },
-        { CF_DIGEST("MD5"), GCRY_MD_MD5 },
-        { CF_DIGEST("RIPEMD160"), GCRY_MD_RMD160 },
-        { CF_DIGEST("WHIRLPOOL"), GCRY_MD_WHIRLPOOL },
-        { CF_DIGEST("BLAKE2B160"), GCRY_MD_BLAKE2B_160 },
-        { CF_DIGEST("BLAKE2B256"), GCRY_MD_BLAKE2B_256 },
-        { CF_DIGEST("BLAKE2B384"), GCRY_MD_BLAKE2B_384 },
-        { CF_DIGEST("BLAKE2B512"), GCRY_MD_BLAKE2B_512 },
-        { CF_DIGEST("BLAKE2S128"), GCRY_MD_BLAKE2S_128 },
-        { CF_DIGEST("BLAKE2S160"), GCRY_MD_BLAKE2S_160 },
-        { CF_DIGEST("BLAKE2S224"), GCRY_MD_BLAKE2S_224 },
-        { CF_DIGEST("BLAKE2S256"), GCRY_MD_BLAKE2S_256 },
-        { CF_DIGEST("SHAKE128"), GCRY_MD_SHAKE128 },
-        { CF_DIGEST("SHAKE256"), GCRY_MD_SHAKE256 },
-        { CF_DIGEST("SHA3-224"), GCRY_MD_SHA3_224 },
-        { CF_DIGEST("SHA3-256"), GCRY_MD_SHA3_256 },
-        { CF_DIGEST("SHA3-384"), GCRY_MD_SHA3_384 },
-        { CF_DIGEST("SHA3-512"), GCRY_MD_SHA3_512 },
-        { CF_DIGEST("STREEBOG-256"), GCRY_MD_STRIBOG256 },
-        { CF_DIGEST("STREEBOG-512"), GCRY_MD_STRIBOG512 },
-        { CF_DIGEST("TIGER"), GCRY_MD_TIGER1 },
-        { CF_DIGEST("GOST-R-34.11-94"), GCRY_MD_GOSTR3411_94 },
-
-        /* All CRCs currently disabled due to somewhat difficult
-         * to reproduce mismatches/garbage output.
-         */
-#if 0
-        { CF_DIGEST("CRC32"), GCRY_MD_CRC32 },
-        { CF_DIGEST("CRC32-RFC1510"), GCRY_MD_CRC32_RFC1510 },
-        { CF_DIGEST("CRC32-RFC2440"), GCRY_MD_CRC24_RFC2440 },
-#endif
-    };
 
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
     std::optional<component::Digest> ret = std::nullopt;
@@ -61,19 +73,18 @@ std::optional<component::Digest> libgcrypt::OpDigest(operation::Digest& op) {
 
     gcry_md_hd_t h;
     bool hOpen = false;
-    int digestType = -1;
+    std::optional<int> digestType = std::nullopt;
 
     /* Initialize */
     {
-        CF_CHECK_NE(LUT.find(op.digestType.Get()), LUT.end());
-        digestType = LUT.at(op.digestType.Get());
+        CF_CHECK_NE(digestType = libgcrypt_detail::DigestIDToID(op.digestType.Get()), std::nullopt);
 
         bool useSecMem = false;
         try {
             useSecMem = ds.Get<bool>();
         } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
 
-        CF_CHECK_EQ(gcry_md_open(&h, digestType, useSecMem ? GCRY_MD_FLAG_SECURE : 0), GPG_ERR_NO_ERROR);
+        CF_CHECK_EQ(gcry_md_open(&h, *digestType, useSecMem ? GCRY_MD_FLAG_SECURE : 0), GPG_ERR_NO_ERROR);
         hOpen = true;
 
         parts = util::ToParts(ds, op.cleartext);
@@ -115,7 +126,7 @@ std::optional<component::Digest> libgcrypt::OpDigest(operation::Digest& op) {
                 {
                     /* Same output size as OpenSSL with SHAKE128 by default */
                     uint8_t out[16];
-                    CF_CHECK_EQ(gcry_md_extract(h, digestType, out, sizeof(out)), GPG_ERR_NO_ERROR);
+                    CF_CHECK_EQ(gcry_md_extract(h, *digestType, out, sizeof(out)), GPG_ERR_NO_ERROR);
                     ret = component::Digest(out, sizeof(out));
                 }
                 break;
@@ -123,15 +134,15 @@ std::optional<component::Digest> libgcrypt::OpDigest(operation::Digest& op) {
                 {
                     /* Same output size as OpenSSL with SHAKE256 by default */
                     uint8_t out[32];
-                    CF_CHECK_EQ(gcry_md_extract(h, digestType, out, sizeof(out)), GPG_ERR_NO_ERROR);
+                    CF_CHECK_EQ(gcry_md_extract(h, *digestType, out, sizeof(out)), GPG_ERR_NO_ERROR);
                     ret = component::Digest(out, sizeof(out));
                 }
                 break;
             default:
                 {
-                    auto out = gcry_md_read(h, digestType);
+                    auto out = gcry_md_read(h, *digestType);
                     CF_CHECK_NE(out, nullptr);
-                    ret = component::Digest(out, gcry_md_get_algo_dlen(digestType));
+                    ret = component::Digest(out, gcry_md_get_algo_dlen(*digestType));
                 }
                 break;
         }
@@ -241,12 +252,12 @@ namespace libgcrypt_detail {
         { CF_CIPHER("RC2_CFB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_CFB} },
         { CF_CIPHER("DES_EDE3_CFB"), {GCRY_CIPHER_3DES, GCRY_CIPHER_MODE_CFB} },
 
+        /* Wrong results */
+#if 0
         { CF_CIPHER("AES_128_CTR"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CTR} },
         { CF_CIPHER("AES_192_CTR"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CTR} },
         { CF_CIPHER("AES_256_CTR"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CTR} },
 
-        /* Wrong results */
-#if 0
         { CF_CIPHER("CAMELLIA_128_CTR"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_CTR} },
         { CF_CIPHER("CAMELLIA_192_CTR"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_CTR} },
         { CF_CIPHER("CAMELLIA_256_CTR"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_CTR} },
@@ -342,6 +353,7 @@ namespace libgcrypt_detail {
             return ret;
         }
 
+        template <bool Encrypt>
         std::optional<size_t> process(void) {
             std::optional<size_t> ret = std::nullopt;
             size_t outIdx = 0;
@@ -358,9 +370,15 @@ namespace libgcrypt_detail {
                     CF_CHECK_EQ(gcry_cipher_final(h), GPG_ERR_NO_ERROR);
                 }
 
-                CF_CHECK_EQ(gcry_cipher_encrypt(h, out + outIdx, outputBufferSize - outIdx, part.first, part.second), GPG_ERR_NO_ERROR);
+                if ( Encrypt == true ) {
+                    CF_CHECK_EQ(gcry_cipher_encrypt(h, out + outIdx, outputBufferSize - outIdx, part.first, part.second), GPG_ERR_NO_ERROR);
+                } else {
+                    CF_CHECK_EQ(gcry_cipher_decrypt(h, out + outIdx, outputBufferSize - outIdx, part.first, part.second), GPG_ERR_NO_ERROR);
+                }
                 outIdx += part.second;
             }
+
+            ret = outIdx;
 
         end:
             return ret;
@@ -394,11 +412,11 @@ namespace libgcrypt_detail {
 
             {
                 /* AEAD currently not supported */
-                CF_CHECK_NE(op.tagSize, std::nullopt);
-                CF_CHECK_NE(op.aad, std::nullopt);
+                CF_CHECK_EQ(op.tagSize, std::nullopt);
+                CF_CHECK_EQ(op.aad, std::nullopt);
 
                 CF_CHECK_EQ(initialize(op.cipher, op.cleartext.GetPtr(), op.cleartext.GetSize()), true);
-                std::optional<size_t> outputSize = process();
+                std::optional<size_t> outputSize = process<true>();
                 CF_CHECK_NE(outputSize, std::nullopt);
 
                 ret = component::Ciphertext(Buffer(out, *outputSize));
@@ -412,11 +430,11 @@ namespace libgcrypt_detail {
 
             {
                 /* AEAD currently not supported */
-                CF_CHECK_NE(op.tag, std::nullopt);
-                CF_CHECK_NE(op.aad, std::nullopt);
+                CF_CHECK_EQ(op.tag, std::nullopt);
+                CF_CHECK_EQ(op.aad, std::nullopt);
 
                 CF_CHECK_EQ(initialize(op.cipher, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), true);
-                std::optional<size_t> outputSize = process();
+                std::optional<size_t> outputSize = process<false>();
                 CF_CHECK_NE(outputSize, std::nullopt);
 
                 ret = component::Cleartext(out, *outputSize);
@@ -429,6 +447,7 @@ namespace libgcrypt_detail {
 } /* namespace libgcrypt_detail */
 
 std::optional<component::Ciphertext> libgcrypt::OpSymmetricEncrypt(operation::SymmetricEncrypt& op) {
+    if ( op.cipher.key.GetSize() != 32 ) return std::nullopt;
     libgcrypt_detail::Crypt crypt(op);
     return crypt.Encrypt(op);
 }
@@ -438,5 +457,59 @@ std::optional<component::Cleartext> libgcrypt::OpSymmetricDecrypt(operation::Sym
     return crypt.Decrypt(op);
 }
 
+std::optional<component::Key> libgcrypt::OpKDF_SCRYPT(operation::KDF_SCRYPT& op) {
+    std::optional<component::Key> ret = std::nullopt;
+
+    const size_t outSize = op.keySize;
+    uint8_t* out = util::malloc(outSize);
+
+    /* Block size fixed at 8 */
+    CF_CHECK_EQ(op.r, 8);
+
+    CF_CHECK_EQ(gcry_kdf_derive(
+                op.password.GetPtr(),
+                op.password.GetSize(),
+                GCRY_KDF_SCRYPT,
+                op.N,
+                op.salt.GetPtr(),
+                op.salt.GetSize(),
+                op.p,
+                outSize,
+                out), GPG_ERR_NO_ERROR);
+
+    ret = component::Key(out, outSize);
+
+end:
+    util::free(out);
+
+    return ret;
+}
+
+std::optional<component::Key> libgcrypt::OpKDF_PBKDF2(operation::KDF_PBKDF2& op) {
+    std::optional<component::Key> ret = std::nullopt;
+
+    const size_t outSize = op.keySize;
+    uint8_t* out = util::malloc(outSize);
+
+    std::optional<int> digestType = std::nullopt;
+    CF_CHECK_NE(digestType = libgcrypt_detail::DigestIDToID(op.digestType.Get()), std::nullopt);
+    CF_CHECK_EQ(gcry_kdf_derive(
+                op.password.GetPtr(),
+                op.password.GetSize(),
+                GCRY_KDF_PBKDF2,
+                *digestType,
+                op.salt.GetPtr(),
+                op.salt.GetSize(),
+                op.iterations,
+                outSize,
+                out), GPG_ERR_NO_ERROR);
+
+    ret = component::Key(out, outSize);
+
+end:
+    util::free(out);
+
+    return ret;
+}
 } /* namespace module */
 } /* namespace cryptofuzz */

@@ -6,6 +6,7 @@
 namespace cryptofuzz {
 namespace operation {
 
+std::string Digest::Name(void) const { return "Digest"; }
 std::string Digest::ToString(void) const {
     std::stringstream ss;
 
@@ -16,6 +17,7 @@ std::string Digest::ToString(void) const {
     return ss.str();
 }
 
+std::string HMAC::Name(void) const { return "HMAC"; }
 std::string HMAC::ToString(void) const {
     std::stringstream ss;
 
@@ -26,6 +28,7 @@ std::string HMAC::ToString(void) const {
     return ss.str();
 }
 
+std::string SymmetricEncrypt::Name(void) const { return "SymmetricEncrypt"; }
 std::string SymmetricEncrypt::ToString(void) const {
     std::stringstream ss;
 
@@ -41,6 +44,7 @@ std::string SymmetricEncrypt::ToString(void) const {
     return ss.str();
 }
 
+std::string SymmetricDecrypt::Name(void) const { return "SymmetricDecrypt"; }
 std::string SymmetricDecrypt::ToString(void) const {
     std::stringstream ss;
 
@@ -66,6 +70,7 @@ SymmetricDecrypt::SymmetricDecrypt(const SymmetricEncrypt& opSymmetricEncrypt, c
     cleartextSize(cleartextSize)
 { }
 
+std::string KDF_SCRYPT::Name(void) const { return "KDF_SCRYPT"; }
 std::string KDF_SCRYPT::ToString(void) const {
     std::stringstream ss;
 
@@ -75,10 +80,12 @@ std::string KDF_SCRYPT::ToString(void) const {
     ss << "N: " << std::to_string(N) << std::endl;
     ss << "r: " << std::to_string(r) << std::endl;
     ss << "p: " << std::to_string(p) << std::endl;
+    ss << "keySize: " << std::to_string(keySize) << std::endl;
 
     return ss.str();
 }
 
+std::string KDF_HKDF::Name(void) const { return "KDF_HKDF"; }
 std::string KDF_HKDF::ToString(void) const {
     std::stringstream ss;
 
@@ -87,10 +94,12 @@ std::string KDF_HKDF::ToString(void) const {
     ss << "password: " << util::HexDump(password.Get()) << std::endl;
     ss << "salt: " << util::HexDump(salt.Get()) << std::endl;
     ss << "info: " << util::HexDump(info.Get()) << std::endl;
+    ss << "keySize: " << std::to_string(keySize) << std::endl;
 
     return ss.str();
 }
 
+std::string KDF_TLS1_PRF::Name(void) const { return "KDF_TLS1_PRF"; }
 std::string KDF_TLS1_PRF::ToString(void) const {
     std::stringstream ss;
 
@@ -98,10 +107,12 @@ std::string KDF_TLS1_PRF::ToString(void) const {
     ss << "digest: " << repository::DigestToString(digestType.Get()) << std::endl;
     ss << "secret: " << util::HexDump(secret.Get()) << std::endl;
     ss << "seed: " << util::HexDump(seed.Get()) << std::endl;
+    ss << "keySize: " << std::to_string(keySize) << std::endl;
 
     return ss.str();
 }
 
+std::string KDF_PBKDF2::Name(void) const { return "KDF_PBKDF2"; }
 std::string KDF_PBKDF2::ToString(void) const {
     std::stringstream ss;
 
@@ -110,10 +121,12 @@ std::string KDF_PBKDF2::ToString(void) const {
     ss << "password: " << util::HexDump(password.Get()) << std::endl;
     ss << "salt: " << util::HexDump(salt.Get()) << std::endl;
     ss << "iterations: " << std::to_string(iterations) << std::endl;
+    ss << "keySize: " << std::to_string(keySize) << std::endl;
 
     return ss.str();
 }
 
+std::string CMAC::Name(void) const { return "CMAC"; }
 std::string CMAC::ToString(void) const {
     std::stringstream ss;
 
@@ -127,6 +140,7 @@ std::string CMAC::ToString(void) const {
     return ss.str();
 }
 
+std::string Sign::Name(void) const { return "Sign"; }
 std::string Sign::ToString(void) const {
     std::stringstream ss;
 
@@ -137,6 +151,7 @@ std::string Sign::ToString(void) const {
     return ss.str();
 }
 
+std::string Verify::Name(void) const { return "Verify"; }
 std::string Verify::ToString(void) const {
     std::stringstream ss;
 
