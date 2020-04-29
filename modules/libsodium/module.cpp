@@ -561,6 +561,8 @@ static class : public AEAD<
 } /* namespace libsodium_detail */
 
 std::optional<component::Ciphertext> libsodium::OpSymmetricEncrypt(operation::SymmetricEncrypt& op) {
+    uint8_t* out = nullptr;
+
     switch ( op.cipher.cipherType.Get() ) {
         case    CF_CIPHER("AES_256_GCM"):
             {
@@ -593,12 +595,30 @@ std::optional<component::Ciphertext> libsodium::OpSymmetricEncrypt(operation::Sy
                 return libsodium_detail::xchacha20_poly1305.Encrypt(op);
             }
             break;
+        case    CF_CIPHER("CHACHA20"):
+            {
+                CF_CHECK_GTE(op.ciphertextSize, op.cleartext.GetSize());
+                CF_CHECK_EQ(op.cipher.key.GetSize(), crypto_stream_chacha20_ietf_KEYBYTES);
+                CF_CHECK_EQ(op.cipher.iv.GetSize(), crypto_stream_chacha20_ietf_NONCEBYTES);
+                out = util::malloc(op.ciphertextSize);
+                CF_CHECK_EQ(crypto_stream_chacha20_ietf_xor_ic(out, op.cleartext.GetPtr(), op.cleartext.GetSize(), op.cipher.iv.GetPtr(), 0, op.cipher.key.GetPtr()), 0);
+                auto ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+                util::free(out);
+                return ret;
+            }
+            break;
         default:
             return std::nullopt;
     }
+
+end:
+    util::free(out);
+    return std::nullopt;
 }
 
 std::optional<component::Cleartext> libsodium::OpSymmetricDecrypt(operation::SymmetricDecrypt& op) {
+    uint8_t* out = nullptr;
+
     switch ( op.cipher.cipherType.Get() ) {
         case    CF_CIPHER("AES_256_GCM"):
             {
@@ -631,9 +651,84 @@ std::optional<component::Cleartext> libsodium::OpSymmetricDecrypt(operation::Sym
                 return libsodium_detail::xchacha20_poly1305.Decrypt(op);
             }
             break;
+        case    CF_CIPHER("CHACHA20"):
+            {
+                CF_CHECK_GTE(op.cleartextSize, op.ciphertext.GetSize());
+                CF_CHECK_EQ(op.cipher.key.GetSize(), crypto_stream_chacha20_ietf_KEYBYTES);
+                CF_CHECK_EQ(op.cipher.iv.GetSize(), crypto_stream_chacha20_ietf_NONCEBYTES);
+                out = util::malloc(op.cleartextSize);
+                CF_CHECK_EQ(crypto_stream_chacha20_ietf_xor_ic(out, op.ciphertext.GetPtr(), op.ciphertext.GetSize(), op.cipher.iv.GetPtr(), 0, op.cipher.key.GetPtr()), 0);
+                auto ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+                util::free(out);
+                return ret;
+            }
+            break;
         default:
             return std::nullopt;
     }
+
+end:
+    util::free(out);
+    return std::nullopt;
+}
+
+std::optional<component::Key> libsodium::OpKDF_ARGON2(operation::KDF_ARGON2& op) {
+    std::optional<component::Key> ret = std::nullopt;
+    uint8_t* out = util::malloc(op.keySize);
+
+    CF_CHECK_EQ(op.salt.GetSize(), crypto_pwhash_SALTBYTES);
+    CF_CHECK_EQ(op.threads, 1);
+    CF_CHECK_GTE(op.keySize, crypto_pwhash_BYTES_MIN);
+    CF_CHECK_GTE(op.password.GetSize(), crypto_pwhash_PASSWD_MIN);
+    CF_CHECK_LTE(op.password.GetSize(), crypto_pwhash_PASSWD_MAX);
+    CF_CHECK_GTE(op.iterations, crypto_pwhash_OPSLIMIT_MIN);
+    CF_CHECK_LTE(op.iterations, crypto_pwhash_OPSLIMIT_MAX);
+    CF_CHECK_GTE(op.memory * 1024, crypto_pwhash_MEMLIMIT_MIN);
+    //CF_CHECK_LTE(op.memory, crypto_pwhash_MEMLIMIT_MAX);
+
+    CF_CHECK_EQ(op.type == 1 || op.type == 2, true);
+    CF_CHECK_EQ(crypto_pwhash(
+                out,
+                op.keySize,
+                (const char*)op.password.GetPtr(),
+                op.password.GetSize(),
+                op.salt.GetPtr(),
+                op.iterations,
+                op.memory * 1024,
+                op.type == 1 ? crypto_pwhash_ALG_ARGON2I13 : crypto_pwhash_ALG_ARGON2ID13
+            ), 0);
+
+    ret = component::Key(out, op.keySize);
+
+end:
+    util::free(out);
+
+    return ret;
+}
+
+std::optional<component::Key> libsodium::OpKDF_SCRYPT(operation::KDF_SCRYPT& op) {
+    std::optional<component::Key> ret = std::nullopt;
+
+    const size_t outSize = op.keySize;
+    uint8_t* out = util::malloc(outSize);
+
+    CF_CHECK_EQ(crypto_pwhash_scryptsalsa208sha256_ll(
+        op.password.GetPtr(),
+        op.password.GetSize(),
+        op.salt.GetPtr(),
+        op.salt.GetSize(),
+        op.N,
+        op.r,
+        op.p,
+        out,
+        outSize), 0);
+
+    ret = component::Key(out, outSize);
+
+end:
+    util::free(out);
+
+    return ret;
 }
 
 } /* namespace module */

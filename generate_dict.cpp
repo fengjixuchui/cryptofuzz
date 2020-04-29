@@ -1,5 +1,8 @@
 #include <cstdint>
 #include <cstddef>
+#include <sstream>
+#include <iomanip>
+#include <vector>
 #include <stdio.h>
 #include <fuzzing/datasource/id.hpp>
 #include "repository_map.h"
@@ -14,42 +17,55 @@ static void write(FILE* fp, uint64_t val) {
     fprintf(fp, "\"\n");
 }
 
+template <class T>
+static void writeMap(FILE* fp, const T& map) {
+    for (const auto item : map ) {
+        write(fp, item.first);
+    }
+}
+
+static void writeBuffer(FILE* fp, const size_t size) {
+    if ( size > 255 ) {
+        printf("Sizes > 255 unsupported\n");
+        abort();
+    }
+
+    std::stringstream ss;
+
+    ss << "\"";
+
+    for (size_t i = 0; i < 4 + size; i++) {
+        if ( i == 0 ) {
+            ss << "\\x" << std::setfill('0') << std::setw(2) << std::hex << size;
+        } else {
+            ss << "\\x00";
+        }
+    }
+
+    ss << "\"";
+
+    fprintf(fp, "%s\n", ss.str().c_str());
+}
+
 int main(void)
 {
     using fuzzing::datasource::ID;
 
     FILE* fp = fopen("cryptofuzz-dict.txt", "wb");
 
-    write(fp, ID("Cryptofuzz/Module/Beast") );
-    write(fp, ID("Cryptofuzz/Module/CPPCrypto") );
-    write(fp, ID("Cryptofuzz/Module/Crypto++") );
-    write(fp, ID("Cryptofuzz/Module/EverCrypt") );
-    write(fp, ID("Cryptofuzz/Module/Monero") );
-    write(fp, ID("Cryptofuzz/Module/OpenSSL") );
-    write(fp, ID("Cryptofuzz/Module/Public Domain") );
-    write(fp, ID("Cryptofuzz/Module/Veracrypt") );
-    write(fp, ID("Cryptofuzz/Module/libgcrypt") );
-    write(fp, ID("Cryptofuzz/Module/libsodium") );
-    write(fp, ID("Cryptofuzz/Module/mbed TLS") );
+    writeMap(fp, ModuleLUTMap);
+    writeMap(fp, OperationLUTMap);
+    writeMap(fp, DigestLUTMap);
+    writeMap(fp, CipherLUTMap);
+    writeMap(fp, ECC_CurveLUTMap);
+    writeMap(fp, CalcOpLUTMap);
 
-    write(fp, ID("Cryptofuzz/Operation/Digest") );
-    write(fp, ID("Cryptofuzz/Operation/HMAC") );
-    write(fp, ID("Cryptofuzz/Operation/SymmetricDecrypt") );
-    write(fp, ID("Cryptofuzz/Operation/SymmetricEncrypt") );
-    write(fp, ID("Cryptofuzz/Operation/KDF_SCRYPT") );
-    write(fp, ID("Cryptofuzz/Operation/KDF_HKDF") );
-    write(fp, ID("Cryptofuzz/Operation/KDF_TLS1_PRF") );
-    write(fp, ID("Cryptofuzz/Operation/KDF_PBKDF2") );
-    write(fp, ID("Cryptofuzz/Operation/CMAC") );
-    write(fp, ID("Cryptofuzz/Operation/Sign") );
-    write(fp, ID("Cryptofuzz/Operation/Verify") );
+    {
+        const std::vector<uint8_t> bufferSizes = {1, 2, 4, 8, 12, 16, 32};
+        for (const auto& size : bufferSizes) {
+            writeBuffer(fp, size);
+        }
 
-    for (const auto digest : DigestLUTMap ) {
-        write(fp, digest.first);
-    }
-
-    for (const auto cipher : CipherLUTMap ) {
-        write(fp, cipher.first);
     }
 
     fclose(fp);

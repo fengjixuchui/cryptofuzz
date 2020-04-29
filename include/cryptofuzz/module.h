@@ -48,7 +48,31 @@ class Module {
             (void)op;
             return std::nullopt;
         }
+        virtual std::optional<component::Key> OpKDF_PBKDF(operation::KDF_PBKDF& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Key> OpKDF_PBKDF1(operation::KDF_PBKDF1& op) {
+            (void)op;
+            return std::nullopt;
+        }
         virtual std::optional<component::Key> OpKDF_PBKDF2(operation::KDF_PBKDF2& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Key> OpKDF_ARGON2(operation::KDF_ARGON2& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Key> OpKDF_SSH(operation::KDF_SSH& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Key> OpKDF_X963(operation::KDF_X963& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Key> OpKDF_BCRYPT(operation::KDF_BCRYPT& op) {
             (void)op;
             return std::nullopt;
         }
@@ -61,6 +85,30 @@ class Module {
             return std::nullopt;
         }
         virtual std::optional<bool> OpVerify(operation::Verify& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::ECC_PublicKey> OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::ECC_KeyPair> OpECC_GenerateKeyPair(operation::ECC_GenerateKeyPair& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::ECDSA_Signature> OpECDSA_Sign(operation::ECDSA_Sign& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<bool> OpECDSA_Verify(operation::ECDSA_Verify& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Secret> OpECDH_Derive(operation::ECDH_Derive& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<component::Bignum> OpBignumCalc(operation::BignumCalc& op) {
             (void)op;
             return std::nullopt;
         }
