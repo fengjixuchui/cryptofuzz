@@ -43,6 +43,7 @@
 #include <shark.h>
 #include <simeck.h>
 #include <simon.h>
+#include <siphash.h>
 #include <skipjack.h>
 #include <sm3.h>
 #include <sm4.h>
@@ -188,10 +189,47 @@ namespace CryptoPP_detail {
                 return ret;
             }
     };
+
+    template <bool Is128Bit>
+    std::optional<component::MAC> SipHash(operation::HMAC& op) {
+        Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+        std::optional<component::MAC> ret = std::nullopt;
+
+        try {
+            ::CryptoPP::SipHash<2, 4, Is128Bit> siphash(op.cipher.key.GetPtr(), op.cipher.key.GetSize());
+            util::Multipart parts = util::ToParts(ds, op.cleartext);
+
+            /* Process */
+            for (const auto& part : parts) {
+                siphash.Update(part.first, part.second);
+            }
+
+            /* Finalize */
+            {
+                uint8_t out[::CryptoPP::SipHash<2, 4, Is128Bit>::DIGESTSIZE];
+                siphash.Final(out);
+
+                ret = component::MAC(out, ::CryptoPP::SipHash<2, 4, Is128Bit>::DIGESTSIZE);
+            }
+        } catch ( ... ) { }
+
+        return ret;
+    }
 }
 
 std::optional<component::MAC> CryptoPP::OpHMAC(operation::HMAC& op) {
-    return CryptoPP_detail::InvokeByDigest<CryptoPP_detail::HMAC, component::MAC>(op);
+    switch ( op.digestType.Get() ) {
+        case CF_DIGEST("SIPHASH64"):
+            {
+                return CryptoPP_detail::SipHash<false>(op);
+            }
+        case CF_DIGEST("SIPHASH128"):
+            {
+                return CryptoPP_detail::SipHash<true>(op);
+            }
+        default:
+            return CryptoPP_detail::InvokeByDigest<CryptoPP_detail::HMAC, component::MAC>(op);
+    }
 }
 
 namespace CryptoPP_detail {
@@ -927,6 +965,11 @@ end:
                         ret = CryptoPP_detail::CryptCBC< ::CryptoPP::SAFER_SK>(op);
                     }
                     break;
+                case    CF_CIPHER("GOST-28147-89_CBC"):
+                    {
+                        ret = CryptoPP_detail::CryptCBC< ::CryptoPP::GOST >(op);
+                    }
+                    break;
 
                     /* ECB */
                 case    CF_CIPHER("KALYNA128_ECB"):
@@ -1555,11 +1598,6 @@ end:
                 case    CF_CIPHER("TWOFISH"):
                     {
                         ret = CryptoPP_detail::CryptRaw< ::CryptoPP::Twofish >(op);
-                    }
-                    break;
-                case    CF_CIPHER("GOST-28147-89"):
-                    {
-                        ret = CryptoPP_detail::CryptRaw< ::CryptoPP::GOST >(op);
                     }
                     break;
 #endif
