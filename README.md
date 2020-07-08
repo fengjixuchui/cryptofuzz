@@ -65,5 +65,12 @@ For instructions on how to run Cryptofuzz, please see [`docs/running.md`](docs/r
 - Crypto++: [SPECK64 different output if input is passed in chunks](https://github.com/weidai11/cryptopp/issues/945)
 - Crypto++: [Undersized SipHash key leads to buffer out-of-bounds read](https://github.com/weidai11/cryptopp/issues/947)
 - libkcapi: [PBKDF2 with iteration count = 0 zeroes output buffer](https://github.com/smuellerDD/libkcapi/issues/93)
-- wolfCrypt: HKDF allows key sizes > 255 * digest size TBA
+- wolfCrypt: [HKDF allows key sizes > 255 * digest size TBA](https://github.com/wolfSSL/wolfssl/pull/2956)
 - Botan: [HKDF clamps output to 255 * requested key size](https://github.com/randombit/botan/issues/2347)
+- SymCrypt: [Signed overshift and other undefined behavior](https://github.com/microsoft/SymCrypt/issues/8)
+- NSS: TBA
+- NSS: TBA
+- OpenSSL: [AES key wrap ciphers out-of-bounds write](https://github.com/openssl/openssl/issues/12014)
+- LibreSSL: [AES key wrap ciphers use-after-free](https://github.com/openbsd/src/commit/f72711c6fb8692f12b01b3a3b7f54687729f6f9b)
+- OpenSSL: [AES key wrap ciphers use-after-free](https://github.com/openssl/openssl/issues/12073)
+- Crypto++: [AES GCM encryption with large tag size results in incorrect output, out-of-bounds reads](https://github.com/weidai11/cryptopp/issues/954)

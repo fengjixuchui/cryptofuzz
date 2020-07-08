@@ -220,71 +220,97 @@ end:
 
 namespace libgcrypt_detail {
     static const std::map<uint64_t, std::pair<int, int>> SymmetricCipherLUT = {
-        { CF_CIPHER("IDEA_ECB"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("DES_ECB"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("AES_128_ECB"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("AES_192_ECB"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("AES_256_ECB"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("SEED_ECB"), {GCRY_CIPHER_SEED, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("BF_ECB"), {GCRY_CIPHER_BLOWFISH, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("CAST5_ECB"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("CAMELLIA_128_ECB"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("CAMELLIA_192_ECB"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("CAMELLIA_256_ECB"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_ECB} },
-        { CF_CIPHER("RC2_ECB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_ECB} },
-
-        { CF_CIPHER("IDEA_CFB"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("DES_CFB"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("AES_128_CFB"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("AES_192_CFB"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("AES_256_CFB"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("SEED_CFB"), {GCRY_CIPHER_SEED, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("BF_CFB"), {GCRY_CIPHER_BLOWFISH, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("CAST5_CFB"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("CAMELLIA_128_CFB"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("CAMELLIA_192_CFB"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("CAMELLIA_256_CFB"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("RC2_CFB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_CFB} },
-        { CF_CIPHER("DES_EDE3_CFB"), {GCRY_CIPHER_3DES, GCRY_CIPHER_MODE_CFB} },
-
-        /* Wrong results */
-#if 0
-        { CF_CIPHER("AES_128_CTR"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CTR} },
-        { CF_CIPHER("AES_192_CTR"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CTR} },
-        { CF_CIPHER("AES_256_CTR"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CTR} },
-
-        { CF_CIPHER("CAMELLIA_128_CTR"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_CTR} },
-        { CF_CIPHER("CAMELLIA_192_CTR"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_CTR} },
-        { CF_CIPHER("CAMELLIA_256_CTR"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_CTR} },
-#endif
-
-        { CF_CIPHER("AES_128_GCM"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_GCM} },
-        { CF_CIPHER("AES_192_GCM"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_GCM} },
-        { CF_CIPHER("AES_256_GCM"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_GCM} },
-
+        { CF_CIPHER("AES_128_CBC"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CBC} },
         { CF_CIPHER("AES_128_CCM"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CCM} },
-        { CF_CIPHER("AES_192_CCM"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CCM} },
-        { CF_CIPHER("AES_256_CCM"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CCM} },
-
-        { CF_CIPHER("AES_128_XTS"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_XTS} },
-        { CF_CIPHER("AES_256_XTS"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_XTS} },
-
-        { CF_CIPHER("IDEA_OFB"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_OFB} },
-        { CF_CIPHER("DES_OFB"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("AES_128_CFB"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("AES_128_CTR"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_CTR} },
+        { CF_CIPHER("AES_128_ECB"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("AES_128_GCM"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_GCM} },
         { CF_CIPHER("AES_128_OFB"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("AES_128_XTS"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_XTS} },
+        { CF_CIPHER("AES_192_CBC"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("AES_192_CCM"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CCM} },
+        { CF_CIPHER("AES_192_CFB"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("AES_192_CTR"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_CTR} },
+        { CF_CIPHER("AES_192_ECB"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("AES_192_GCM"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_GCM} },
         { CF_CIPHER("AES_192_OFB"), {GCRY_CIPHER_AES192, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("AES_256_CBC"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("AES_256_CCM"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CCM} },
+        { CF_CIPHER("AES_256_CFB"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("AES_256_CTR"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_CTR} },
+        { CF_CIPHER("AES_256_ECB"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("AES_256_GCM"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_GCM} },
         { CF_CIPHER("AES_256_OFB"), {GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_OFB} },
-        { CF_CIPHER("SEED_OFB"), {GCRY_CIPHER_SEED, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("AES_256_XTS"), {GCRY_CIPHER_AES128, GCRY_CIPHER_MODE_XTS} },
+        { CF_CIPHER("BF_CBC"), {GCRY_CIPHER_BLOWFISH, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("BF_CFB"), {GCRY_CIPHER_BLOWFISH, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("BF_ECB"), {GCRY_CIPHER_BLOWFISH, GCRY_CIPHER_MODE_ECB} },
         { CF_CIPHER("BF_OFB"), {GCRY_CIPHER_BLOWFISH, GCRY_CIPHER_MODE_OFB} },
-        { CF_CIPHER("CAST5_OFB"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("CAMELLIA_128_CBC"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("CAMELLIA_128_CFB"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("CAMELLIA_128_CTR"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_CTR} },
+        { CF_CIPHER("CAMELLIA_128_ECB"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_ECB} },
         { CF_CIPHER("CAMELLIA_128_OFB"), {GCRY_CIPHER_CAMELLIA128, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("CAMELLIA_192_CBC"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("CAMELLIA_192_CFB"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("CAMELLIA_192_CTR"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_CTR} },
+        { CF_CIPHER("CAMELLIA_192_ECB"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_ECB} },
         { CF_CIPHER("CAMELLIA_192_OFB"), {GCRY_CIPHER_CAMELLIA192, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("CAMELLIA_256_CBC"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("CAMELLIA_256_CFB"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("CAMELLIA_256_CTR"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_CTR} },
+        { CF_CIPHER("CAMELLIA_256_ECB"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_ECB} },
         { CF_CIPHER("CAMELLIA_256_OFB"), {GCRY_CIPHER_CAMELLIA256, GCRY_CIPHER_MODE_OFB} },
-        { CF_CIPHER("RC2_OFB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_OFB} },
-        { CF_CIPHER("DES_EDE3_OFB"), {GCRY_CIPHER_3DES, GCRY_CIPHER_MODE_OFB} },
-
+        { CF_CIPHER("CAST5_CBC"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("CAST5_CFB"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("CAST5_ECB"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("CAST5_OFB"), {GCRY_CIPHER_CAST5, GCRY_CIPHER_MODE_OFB} },
         { CF_CIPHER("CHACHA20"), {GCRY_CIPHER_CHACHA20, GCRY_CIPHER_MODE_STREAM} },
+        { CF_CIPHER("DES_CBC"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("DES_CFB"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("DES_ECB"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("DES_EDE3_CFB"), {GCRY_CIPHER_3DES, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("DES_EDE3_OFB"), {GCRY_CIPHER_3DES, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("DES_OFB"), {GCRY_CIPHER_DES, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("IDEA_CBC"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_CBC} },
+        { CF_CIPHER("IDEA_CFB"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("IDEA_ECB"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("IDEA_OFB"), {GCRY_CIPHER_IDEA, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("RC2_CFB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("RC2_ECB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("RC2_OFB"), {GCRY_CIPHER_RFC2268_128, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("SEED_CFB"), {GCRY_CIPHER_SEED, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("SEED_ECB"), {GCRY_CIPHER_SEED, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("SEED_OFB"), {GCRY_CIPHER_SEED, GCRY_CIPHER_MODE_OFB} },
+        { CF_CIPHER("SM4_CFB"), {GCRY_CIPHER_SM4, GCRY_CIPHER_MODE_CFB} },
+        { CF_CIPHER("SM4_ECB"), {GCRY_CIPHER_SM4, GCRY_CIPHER_MODE_ECB} },
+        { CF_CIPHER("SM4_OFB"), {GCRY_CIPHER_SM4, GCRY_CIPHER_MODE_OFB} },
     };
+
+    std::optional<size_t> Blocksize(const uint64_t cipher) {
+        std::optional<size_t> ret = std::nullopt;
+
+        switch ( cipher ) {
+            case    CF_CIPHER("AES_128_CBC"):
+            case    CF_CIPHER("AES_192_CBC"):
+            case    CF_CIPHER("AES_256_CBC"):
+            case    CF_CIPHER("CAMELLIA_128_CBC"):
+            case    CF_CIPHER("CAMELLIA_192_CBC"):
+            case    CF_CIPHER("CAMELLIA_256_CBC"):
+                ret = 16;
+                break;
+            case    CF_CIPHER("BF_CBC"):
+            case    CF_CIPHER("CAST5_CBC"):
+            case    CF_CIPHER("DES_CBC"):
+            case    CF_CIPHER("IDEA_CBC"):
+                ret = 8;
+                break;
+        }
+
+        return ret;
+    }
+
     class Crypt {
         private:
 
@@ -300,9 +326,6 @@ namespace libgcrypt_detail {
             {
                 CF_CHECK_NE(outputBufferSize, 0);
                 CF_CHECK_NE(SymmetricCipherLUT.find(cipher.cipherType.Get()), SymmetricCipherLUT.end());
-
-                /* CTR is broken */
-                //CF_CHECK_EQ(repository::IsCTR(cipher.cipherType.Get()), false);
 
                 /* CFB is broken */
                 //CF_CHECK_EQ(repository::IsCFB(cipher.cipherType.Get()), false);
@@ -327,6 +350,8 @@ namespace libgcrypt_detail {
                 CF_CHECK_EQ(gcry_cipher_setkey(h, cipher.key.GetPtr(), cipher.key.GetSize()), GPG_ERR_NO_ERROR);
                 if ( cipher.cipherType.Get() == CF_CIPHER("CHACHA20") ) {
                     CF_CHECK_EQ(gcry_cipher_setiv(h, cipher.iv.GetPtr(), cipher.iv.GetSize()), GPG_ERR_NO_ERROR);
+                } else if ( repository::IsCTR(cipher.cipherType.Get()) ) {
+                    CF_CHECK_EQ(gcry_cipher_setctr(h, cipher.iv.GetPtr(), cipher.iv.GetSize()), GPG_ERR_NO_ERROR);
                 } else {
                     CF_CHECK_EQ(gcry_cipher_setiv(h, cipher.iv.GetPtr(), cipher.iv.GetSize()), GPG_ERR_NO_ERROR);
                 }
@@ -414,7 +439,14 @@ namespace libgcrypt_detail {
                 CF_CHECK_EQ(op.tagSize, std::nullopt);
                 CF_CHECK_EQ(op.aad, std::nullopt);
 
-                CF_CHECK_EQ(initialize(op.cipher, op.cleartext.GetPtr(), op.cleartext.GetSize()), true);
+                std::vector<uint8_t> cleartext = op.cleartext.Get();
+                if ( repository::IsCBC(op.cipher.cipherType.Get()) ) {
+                    auto blockSize = Blocksize(op.cipher.cipherType.Get());
+                    CF_CHECK_NE(blockSize, std::nullopt);
+
+                    cleartext = util::Pkcs7Pad(op.cleartext.Get(), *blockSize);
+                }
+                CF_CHECK_EQ(initialize(op.cipher, cleartext.data(), cleartext.size()), true);
                 std::optional<size_t> outputSize = process<true>();
                 CF_CHECK_NE(outputSize, std::nullopt);
 
@@ -436,7 +468,17 @@ namespace libgcrypt_detail {
                 std::optional<size_t> outputSize = process<false>();
                 CF_CHECK_NE(outputSize, std::nullopt);
 
-                ret = component::Cleartext(out, *outputSize);
+                if ( repository::IsCBC(op.cipher.cipherType.Get()) ) {
+                    auto blockSize = Blocksize(op.cipher.cipherType.Get());
+                    CF_CHECK_NE(blockSize, std::nullopt);
+
+                    const auto unpaddedCleartext = util::Pkcs7Unpad( std::vector<uint8_t>(out, out + *outputSize), *blockSize);
+                    CF_CHECK_NE(unpaddedCleartext, std::nullopt);
+
+                    ret = component::Cleartext(Buffer(*unpaddedCleartext));
+                } else {
+                    ret = component::Cleartext(out, *outputSize);
+                }
             }
         end:
             return ret;
@@ -446,7 +488,6 @@ namespace libgcrypt_detail {
 } /* namespace libgcrypt_detail */
 
 std::optional<component::Ciphertext> libgcrypt::OpSymmetricEncrypt(operation::SymmetricEncrypt& op) {
-    if ( op.cipher.key.GetSize() != 32 ) return std::nullopt;
     libgcrypt_detail::Crypt crypt(op);
     return crypt.Encrypt(op);
 }
@@ -542,7 +583,7 @@ namespace libgcrypt_detail {
         };
 
         if ( LUT.find(curveType.Get()) == LUT.end() ) {
-            return std::nullopt;;
+            return std::nullopt;
         }
 
         return LUT.at(curveType.Get());

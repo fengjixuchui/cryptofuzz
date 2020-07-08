@@ -36,12 +36,47 @@ extern "C" {
 namespace cryptofuzz {
 namespace module {
 
+namespace wolfCrypt_detail {
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+    Datasource* ds;
+#endif
+
+    inline void SetGlobalDs(Datasource* ds) {
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+        wolfCrypt_detail::ds = ds;
+#else
+        (void)ds;
+#endif
+    }
+
+    inline void UnsetGlobalDs(void) {
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+        wolfCrypt_detail::ds = nullptr;
+#endif
+    }
+
+    inline bool AllocationFailure(void) {
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+        bool fail = false;
+        if ( ds == nullptr ) {
+            return fail;
+        }
+        try {
+            fail = ds->Get<bool>();
+        } catch ( ... ) { }
+
+        return fail;
+#else
+        return false;
+#endif
+    }
+}
 static void* wolfCrypt_custom_malloc(size_t n) {
-    return util::malloc(n);
+    return wolfCrypt_detail::AllocationFailure() ? nullptr : util::malloc(n);
 }
 
 static void* wolfCrypt_custom_realloc(void* ptr, size_t n) {
-    return util::realloc(ptr, n);
+    return wolfCrypt_detail::AllocationFailure() ? nullptr : util::realloc(ptr, n);
 }
 
 static void wolfCrypt_custom_free(void* ptr) {
@@ -51,6 +86,7 @@ static void wolfCrypt_custom_free(void* ptr) {
 wolfCrypt::wolfCrypt(void) :
     Module("wolfCrypt") {
 
+    wolfCrypt_detail::SetGlobalDs(nullptr);
     if ( wolfSSL_SetAllocators(wolfCrypt_custom_malloc, wolfCrypt_custom_free, wolfCrypt_custom_realloc) != 0 ) {
         abort();
     }
@@ -70,9 +106,9 @@ namespace wolfCrypt_detail {
             virtual std::optional<ReturnType> runFinalize(void) = 0;
             virtual void runFree(void) = 0;
 
-            std::optional<ReturnType> Run(OperationType& op) {
+            std::optional<ReturnType> Run(OperationType& op, Datasource& ds) {
                 std::optional<ReturnType> ret = std::nullopt;
-                Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+                //Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
                 util::Multipart parts;
 
                 if ( runInit(op) == false ) {
@@ -447,54 +483,58 @@ end:
 
 std::optional<component::Digest> wolfCrypt::OpDigest(operation::Digest& op) {
     std::optional<component::Digest> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     switch ( op.digestType.Get() ) {
         case CF_DIGEST("MD2"):
-            ret = wolfCrypt_detail::md2.Run(op);
+            ret = wolfCrypt_detail::md2.Run(op, ds);
             break;
         case CF_DIGEST("MD4"):
-            ret = wolfCrypt_detail::md4.Run(op);
+            ret = wolfCrypt_detail::md4.Run(op, ds);
             break;
         case CF_DIGEST("MD5"):
-            ret = wolfCrypt_detail::md5.Run(op);
+            ret = wolfCrypt_detail::md5.Run(op, ds);
             break;
         case CF_DIGEST("RIPEMD160"):
-            ret = wolfCrypt_detail::ripemd160.Run(op);
+            ret = wolfCrypt_detail::ripemd160.Run(op, ds);
             break;
         case CF_DIGEST("SHA1"):
-            ret = wolfCrypt_detail::sha1.Run(op);
+            ret = wolfCrypt_detail::sha1.Run(op, ds);
             break;
         case CF_DIGEST("SHA224"):
-            ret = wolfCrypt_detail::sha224.Run(op);
+            ret = wolfCrypt_detail::sha224.Run(op, ds);
             break;
         case CF_DIGEST("SHA256"):
-            ret = wolfCrypt_detail::sha256.Run(op);
+            ret = wolfCrypt_detail::sha256.Run(op, ds);
             break;
         case CF_DIGEST("SHA384"):
-            ret = wolfCrypt_detail::sha384.Run(op);
+            ret = wolfCrypt_detail::sha384.Run(op, ds);
             break;
         case CF_DIGEST("SHA512"):
-            ret = wolfCrypt_detail::sha512.Run(op);
+            ret = wolfCrypt_detail::sha512.Run(op, ds);
             break;
         case CF_DIGEST("SHA3-224"):
-            ret = wolfCrypt_detail::sha3_224.Run(op);
+            ret = wolfCrypt_detail::sha3_224.Run(op, ds);
             break;
         case CF_DIGEST("SHA3-256"):
-            ret = wolfCrypt_detail::sha3_256.Run(op);
+            ret = wolfCrypt_detail::sha3_256.Run(op, ds);
             break;
         case CF_DIGEST("SHA3-384"):
-            ret = wolfCrypt_detail::sha3_384.Run(op);
+            ret = wolfCrypt_detail::sha3_384.Run(op, ds);
             break;
         case CF_DIGEST("SHA3-512"):
-            ret = wolfCrypt_detail::sha3_512.Run(op);
+            ret = wolfCrypt_detail::sha3_512.Run(op, ds);
             break;
         case CF_DIGEST("BLAKE2B512"):
-            ret = wolfCrypt_detail::blake2b512.Run(op);
+            ret = wolfCrypt_detail::blake2b512.Run(op, ds);
             break;
         case CF_DIGEST("BLAKE2S256"):
-            ret = wolfCrypt_detail::blake2s256.Run(op);
+            ret = wolfCrypt_detail::blake2s256.Run(op, ds);
             break;
     }
+
+    wolfCrypt_detail::UnsetGlobalDs();
 
     return ret;
 }
@@ -502,6 +542,7 @@ std::optional<component::Digest> wolfCrypt::OpDigest(operation::Digest& op) {
 std::optional<component::MAC> wolfCrypt::OpHMAC(operation::HMAC& op) {
     std::optional<component::MAC> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     std::optional<int> hashType;
     std::optional<size_t> hashSize;
@@ -509,7 +550,6 @@ std::optional<component::MAC> wolfCrypt::OpHMAC(operation::HMAC& op) {
     Hmac ctx;
     uint8_t* out = nullptr;
     util::Multipart parts;
-
 
     /* Initialize */
     {
@@ -540,12 +580,15 @@ std::optional<component::MAC> wolfCrypt::OpHMAC(operation::HMAC& op) {
 end:
     util::free(out);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::SymmetricEncrypt& op) {
     std::optional<component::Ciphertext> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = nullptr;
     uint8_t* outTag = nullptr;
@@ -711,15 +754,44 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
             out = util::malloc(op.cleartext.GetSize());
             outTag = util::malloc(*op.tagSize);
 
-            CF_CHECK_EQ(wc_ChaCha20Poly1305_Encrypt(
-                        op.cipher.key.GetPtr(),
-                        op.cipher.iv.GetPtr(),
-                        op.aad->GetPtr(),
-                        op.aad->GetSize(),
-                        op.cleartext.GetPtr(),
-                        op.cleartext.GetSize(),
-                        out,
-                        outTag), 0);
+            bool oneShot = true;
+            try {
+                oneShot = ds.Get<bool>();
+            } catch ( ... ) { }
+
+            if ( oneShot == true ) {
+                CF_CHECK_EQ(wc_ChaCha20Poly1305_Encrypt(
+                            op.cipher.key.GetPtr(),
+                            op.cipher.iv.GetPtr(),
+                            op.aad->GetPtr(),
+                            op.aad->GetSize(),
+                            op.cleartext.GetPtr(),
+                            op.cleartext.GetSize(),
+                            out,
+                            outTag), 0);
+            } else {
+                ChaChaPoly_Aead aead;
+
+                CF_CHECK_EQ(wc_ChaCha20Poly1305_Init(&aead, op.cipher.key.GetPtr(), op.cipher.iv.GetPtr(), 1), 0);
+
+                {
+                    const auto partsAAD = util::ToParts(ds, *op.aad);
+                    for (const auto& part : partsAAD) {
+                        CF_CHECK_EQ(wc_ChaCha20Poly1305_UpdateAad(&aead, part.first, part.second), 0);
+                    }
+                }
+
+                {
+                    const auto partsData = util::ToParts(ds, op.cleartext);
+                    size_t pos = 0;
+                    for (const auto& part : partsData) {
+                        CF_CHECK_EQ(wc_ChaCha20Poly1305_UpdateData(&aead, part.first, out + pos, part.second), 0);
+                        pos += part.second;
+                    }
+                }
+
+                CF_CHECK_EQ(wc_ChaCha20Poly1305_Final(&aead, outTag), 0);
+            }
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()), Buffer(outTag, CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE));
         }
@@ -797,6 +869,68 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
 
             CF_CHECK_EQ(wc_AesXtsSetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), AES_ENCRYPTION, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesXtsEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize(), op.cipher.iv.GetPtr(), op.cipher.iv.GetSize()), 0);
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_CFB"):
+        case CF_CIPHER("AES_192_CFB"):
+        case CF_CIPHER("AES_256_CFB"):
+        {
+            Aes ctx;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_CFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_CFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_CFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+            CF_CHECK_EQ(wc_AesCfbEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_OFB"):
+        case CF_CIPHER("AES_192_OFB"):
+        case CF_CIPHER("AES_256_OFB"):
+        {
+            Aes ctx;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_OFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_OFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_OFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+            CF_CHECK_EQ(wc_AesOfbEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
         }
@@ -909,12 +1043,15 @@ end:
     util::free(out);
     util::free(outTag);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::SymmetricDecrypt& op) {
     std::optional<component::Cleartext> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = nullptr;
 
@@ -1078,15 +1215,49 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 
             out = util::malloc(op.ciphertext.GetSize());
 
-            CF_CHECK_EQ(wc_ChaCha20Poly1305_Decrypt(
-                        op.cipher.key.GetPtr(),
-                        op.cipher.iv.GetPtr(),
-                        op.aad->GetPtr(),
-                        op.aad->GetSize(),
-                        op.ciphertext.GetPtr(),
-                        op.ciphertext.GetSize(),
-                        op.tag->GetPtr(),
-                        out), 0);
+            bool oneShot = true;
+            try {
+                oneShot = ds.Get<bool>();
+            } catch ( ... ) { }
+
+            if ( oneShot == true ) {
+                CF_CHECK_EQ(wc_ChaCha20Poly1305_Decrypt(
+                            op.cipher.key.GetPtr(),
+                            op.cipher.iv.GetPtr(),
+                            op.aad->GetPtr(),
+                            op.aad->GetSize(),
+                            op.ciphertext.GetPtr(),
+                            op.ciphertext.GetSize(),
+                            op.tag->GetPtr(),
+                            out), 0);
+            } else {
+                ChaChaPoly_Aead aead;
+
+                CF_CHECK_EQ(wc_ChaCha20Poly1305_Init(&aead, op.cipher.key.GetPtr(), op.cipher.iv.GetPtr(), 0), 0);
+
+                {
+                    const auto partsAAD = util::ToParts(ds, *op.aad);
+                    for (const auto& part : partsAAD) {
+                        CF_CHECK_EQ(wc_ChaCha20Poly1305_UpdateAad(&aead, part.first, part.second), 0);
+                    }
+                }
+
+                {
+                    const auto partsData = util::ToParts(ds, op.ciphertext);
+                    size_t pos = 0;
+                    for (const auto& part : partsData) {
+                        CF_CHECK_EQ(wc_ChaCha20Poly1305_UpdateData(&aead, part.first, out + pos, part.second), 0);
+                        pos += part.second;
+                    }
+
+                }
+
+                {
+                    uint8_t outTag[CHACHA20_POLY1305_AEAD_AUTHTAG_SIZE];
+                    CF_CHECK_EQ(wc_ChaCha20Poly1305_Final(&aead, outTag), 0);
+                    CF_CHECK_EQ(wc_ChaCha20Poly1305_CheckTag(outTag, op.tag->GetPtr()), 0);
+                }
+            }
 
             ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
         }
@@ -1164,6 +1335,70 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 
             CF_CHECK_EQ(wc_AesXtsSetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), AES_DECRYPTION, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesXtsDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize(), op.cipher.iv.GetPtr(), op.cipher.iv.GetSize()), 0);
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_CFB"):
+        case CF_CIPHER("AES_192_CFB"):
+        case CF_CIPHER("AES_256_CFB"):
+        {
+            Aes ctx;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_CFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_CFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_CFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+            CF_CHECK_GT(op.cipher.key.GetSize(), 0);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+            CF_CHECK_EQ(wc_AesCfbDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_OFB"):
+        case CF_CIPHER("AES_192_OFB"):
+        case CF_CIPHER("AES_256_OFB"):
+        {
+            Aes ctx;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_OFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_OFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_OFB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+            CF_CHECK_GT(op.cipher.key.GetSize(), 0);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+            CF_CHECK_EQ(wc_AesOfbDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
 
             ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
         }
@@ -1278,6 +1513,8 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 end:
     util::free(out);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
@@ -1289,6 +1526,7 @@ std::optional<component::MAC> wolfCrypt::OpCMAC(operation::CMAC& op) {
 
     std::optional<component::MAC> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     Cmac ctx;
     uint8_t out[AES_BLOCK_SIZE];
@@ -1342,11 +1580,15 @@ std::optional<component::MAC> wolfCrypt::OpCMAC(operation::CMAC& op) {
 
 end:
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Key> wolfCrypt::OpKDF_PBKDF(operation::KDF_PBKDF& op) {
     std::optional<component::Key> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = util::malloc(op.keySize);
 
@@ -1368,6 +1610,8 @@ std::optional<component::Key> wolfCrypt::OpKDF_PBKDF(operation::KDF_PBKDF& op) {
 
 end:
     util::free(out);
+
+    wolfCrypt_detail::UnsetGlobalDs();
 
     return ret;
 }
@@ -1400,11 +1644,15 @@ std::optional<component::Key> wolfCrypt::OpKDF_PBKDF1(operation::KDF_PBKDF1& op)
 end:
     util::free(out);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Key> wolfCrypt::OpKDF_PBKDF2(operation::KDF_PBKDF2& op) {
     std::optional<component::Key> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = util::malloc(op.keySize);
 
@@ -1431,11 +1679,15 @@ std::optional<component::Key> wolfCrypt::OpKDF_PBKDF2(operation::KDF_PBKDF2& op)
 end:
     util::free(out);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Key> wolfCrypt::OpKDF_SCRYPT(operation::KDF_SCRYPT& op) {
     std::optional<component::Key> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = util::malloc(op.keySize);
 
@@ -1460,11 +1712,16 @@ std::optional<component::Key> wolfCrypt::OpKDF_SCRYPT(operation::KDF_SCRYPT& op)
 end:
     util::free(out);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Key> wolfCrypt::OpKDF_HKDF(operation::KDF_HKDF& op) {
     std::optional<component::Key> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
+
     uint8_t* out = util::malloc(op.keySize);
 
     auto hashType = wolfCrypt_detail::toHashType(op.digestType);
@@ -1490,11 +1747,15 @@ std::optional<component::Key> wolfCrypt::OpKDF_HKDF(operation::KDF_HKDF& op) {
 end:
     util::free(out);
 
+    wolfCrypt_detail::UnsetGlobalDs();
+
     return ret;
 }
 
 std::optional<component::Key> wolfCrypt::OpKDF_TLS1_PRF(operation::KDF_TLS1_PRF& op) {
     std::optional<component::Key> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = util::malloc(op.keySize);
 
@@ -1514,14 +1775,17 @@ std::optional<component::Key> wolfCrypt::OpKDF_TLS1_PRF(operation::KDF_TLS1_PRF&
     ret = component::Key(out, op.keySize);
 
 end:
-
     util::free(out);
+
+    wolfCrypt_detail::UnsetGlobalDs();
 
     return ret;
 }
 
 std::optional<component::Key> wolfCrypt::OpKDF_X963(operation::KDF_X963& op) {
     std::optional<component::Key> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    wolfCrypt_detail::SetGlobalDs(&ds);
 
     uint8_t* out = util::malloc(op.keySize);
 
@@ -1541,8 +1805,9 @@ std::optional<component::Key> wolfCrypt::OpKDF_X963(operation::KDF_X963& op) {
     ret = component::Key(out, op.keySize);
 
 end:
-
     util::free(out);
+
+    wolfCrypt_detail::UnsetGlobalDs();
 
     return ret;
 }
