@@ -1330,7 +1330,7 @@ namespace OpenSSL_detail {
             macSize = op.digestType.Get() == CF_DIGEST("SIPHASH64") ? 8 : 16;
             parts = util::ToParts(ds, op.cleartext);
             siphash = EVP_MAC_fetch(nullptr, "SIPHASH", nullptr);
-            ctx = EVP_MAC_new_ctx(siphash);
+            ctx = EVP_MAC_CTX_new(siphash);
             CF_CHECK_EQ(EVP_MAC_init(ctx), 1);
 
             auto keyCopy = op.cipher.key.Get();
@@ -1343,7 +1343,7 @@ namespace OpenSSL_detail {
             *p++ = OSSL_PARAM_construct_uint(OSSL_MAC_PARAM_SIZE, &macSize_ui);
 
             *p = OSSL_PARAM_construct_end();
-            CF_CHECK_EQ(EVP_MAC_set_ctx_params(ctx, params), 1);
+            CF_CHECK_EQ(EVP_MAC_CTX_set_params(ctx, params), 1);
             out = util::malloc(macSize);
         }
 
@@ -1358,7 +1358,7 @@ namespace OpenSSL_detail {
 end:
         util::free(out);
 
-        EVP_MAC_free_ctx(ctx);
+        EVP_MAC_CTX_free(ctx);
         EVP_MAC_free(siphash);
 
 #endif
@@ -2346,12 +2346,12 @@ std::optional<component::Key> OpenSSL::OpKDF_SCRYPT_EVP_KDF(operation::KDF_SCRYP
         {
             EVP_KDF* kdf = EVP_KDF_fetch(nullptr, OSSL_KDF_NAME_SCRYPT, nullptr);
             CF_CHECK_NE(kdf, nullptr);
-            kctx = EVP_KDF_new_ctx(kdf);
+            kctx = EVP_KDF_CTX_new(kdf);
             EVP_KDF_free(kdf);
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_set_ctx_params(kctx, params), 1);
+        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
     }
 
     /* Process */
@@ -2365,7 +2365,7 @@ std::optional<component::Key> OpenSSL::OpKDF_SCRYPT_EVP_KDF(operation::KDF_SCRYP
     }
 
 end:
-    EVP_KDF_free_ctx(kctx);
+    EVP_KDF_CTX_free(kctx);
 
     util::free(out);
     return ret;
@@ -2583,12 +2583,12 @@ end:
         {
             EVP_KDF* kdf = EVP_KDF_fetch(nullptr, OSSL_KDF_NAME_PBKDF2, nullptr);
             CF_CHECK_NE(kdf, nullptr);
-            kctx = EVP_KDF_new_ctx(kdf);
+            kctx = EVP_KDF_CTX_new(kdf);
             EVP_KDF_free(kdf);
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_set_ctx_params(kctx, params), 1);
+        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
     }
 
     /* Process */
@@ -2602,7 +2602,7 @@ end:
     }
 
 end:
-    EVP_KDF_free_ctx(kctx);
+    EVP_KDF_CTX_free(kctx);
 
     util::free(out);
 
@@ -2654,7 +2654,7 @@ std::optional<component::Key> OpenSSL::OpKDF_ARGON2(operation::KDF_ARGON2& op) {
     }
 
 end:
-    EVP_KDF_free_ctx(kctx);
+    EVP_KDF_CTX_free(kctx);
 
     util::free(out);
 
@@ -2706,12 +2706,12 @@ std::optional<component::Key> OpenSSL::OpKDF_SSH(operation::KDF_SSH& op) {
         {
             EVP_KDF* kdf = EVP_KDF_fetch(nullptr, OSSL_KDF_NAME_SSHKDF, nullptr);
             CF_CHECK_NE(kdf, nullptr);
-            kctx = EVP_KDF_new_ctx(kdf);
+            kctx = EVP_KDF_CTX_new(kdf);
             EVP_KDF_free(kdf);
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_set_ctx_params(kctx, params), 1);
+        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
     }
 
     /* Process */
@@ -2725,7 +2725,7 @@ std::optional<component::Key> OpenSSL::OpKDF_SSH(operation::KDF_SSH& op) {
     }
 
 end:
-    EVP_KDF_free_ctx(kctx);
+    EVP_KDF_CTX_free(kctx);
 
     util::free(out);
 
@@ -2763,12 +2763,12 @@ std::optional<component::Key> OpenSSL::OpKDF_X963(operation::KDF_X963& op) {
         {
             EVP_KDF* kdf = EVP_KDF_fetch(nullptr, "X963KDF", nullptr);
             CF_CHECK_NE(kdf, nullptr);
-            kctx = EVP_KDF_new_ctx(kdf);
+            kctx = EVP_KDF_CTX_new(kdf);
             EVP_KDF_free(kdf);
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_set_ctx_params(kctx, params), 1);
+        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
     }
 
     /* Process */
@@ -2782,7 +2782,95 @@ std::optional<component::Key> OpenSSL::OpKDF_X963(operation::KDF_X963& op) {
     }
 
 end:
-    EVP_KDF_free_ctx(kctx);
+    EVP_KDF_CTX_free(kctx);
+
+    util::free(out);
+
+    return ret;
+}
+
+std::optional<component::Key> OpenSSL::OpKDF_SP_800_108(operation::KDF_SP_800_108& op) {
+    std::optional<component::Key> ret = std::nullopt;
+    EVP_KDF_CTX* kctx = nullptr;
+    const EVP_MD* md = nullptr;
+    OSSL_PARAM params[7], *p = params;
+    uint8_t* out = util::malloc(op.keySize);
+
+    std::string hmacStr = "HMAC";
+    std::string counterStr = "COUNTER";
+    std::string feedbackStr = "FEEDBACK";
+
+    /* Initialize */
+    {
+        if ( op.mode != 0 && op.mode != 1 ) {
+            goto end;
+        }
+
+        if ( op.mode == 1 ) {
+            /* XXX Salt is ignored in feedback mode */
+            CF_CHECK_EQ(op.salt.GetSize(), 0);
+        }
+
+        CF_CHECK_EQ(op.mech.mode, true); /* Currently only HMAC supported, not CMAC */
+
+        CF_CHECK_NE(op.secret.GetSize(), 0); /* Crashes if secret is empty. https://github.com/openssl/openssl/issues/12409 */
+        CF_CHECK_NE(md = toEVPMD(op.mech.type), nullptr);
+
+        std::string mdName(EVP_MD_name(md));
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, mdName.data(), 0);
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_MAC, hmacStr.data(), 0);
+
+        if ( op.mode == 0 ) {
+            *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_MODE, counterStr.data(), 0);
+        } else if ( op.mode == 1 ) {
+            *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_MODE, feedbackStr.data(), 0);
+        } else {
+            abort();
+        }
+
+        auto secretCopy = op.secret.Get();
+        *p++ = OSSL_PARAM_construct_octet_string(
+                OSSL_KDF_PARAM_KEY,
+                secretCopy.data(),
+                secretCopy.size());
+
+        auto labelCopy = op.label.Get();
+        *p++ = OSSL_PARAM_construct_octet_string(
+                OSSL_KDF_PARAM_SALT,
+                labelCopy.data(),
+                labelCopy.size());
+
+        auto saltCopy = op.salt.Get();
+        *p++ = OSSL_PARAM_construct_octet_string(
+                OSSL_KDF_PARAM_INFO,
+                saltCopy.data(),
+                saltCopy.size());
+
+        *p = OSSL_PARAM_construct_end();
+
+        {
+            EVP_KDF* kdf = EVP_KDF_fetch(nullptr, "KBKDF", nullptr);
+            CF_CHECK_NE(kdf, nullptr);
+            kctx = EVP_KDF_CTX_new(kdf);
+            EVP_KDF_free(kdf);
+            CF_CHECK_NE(kctx, nullptr);
+        }
+
+        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
+    }
+
+    /* Process */
+    {
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize), 0);
+    }
+
+    /* Finalize */
+    {
+        ret = component::Key(out, op.keySize);
+    }
+
+end:
+    EVP_KDF_CTX_free(kctx);
 
     util::free(out);
 
@@ -3406,6 +3494,30 @@ std::optional<component::Bignum> OpenSSL::OpBignumCalc(operation::BignumCalc& op
             break;
         case    CF_CALCOP("Abs(A)"):
             opRunner = std::make_unique<OpenSSL_bignum::Abs>();
+            break;
+        case    CF_CALCOP("RShift(A,B)"):
+            opRunner = std::make_unique<OpenSSL_bignum::RShift>();
+            break;
+        case    CF_CALCOP("LShift1(A)"):
+            opRunner = std::make_unique<OpenSSL_bignum::LShift1>();
+            break;
+        case    CF_CALCOP("SetBit(A,B)"):
+            opRunner = std::make_unique<OpenSSL_bignum::SetBit>();
+            break;
+        case    CF_CALCOP("ClearBit(A,B)"):
+            opRunner = std::make_unique<OpenSSL_bignum::ClearBit>();
+            break;
+        case    CF_CALCOP("Bit(A,B)"):
+            opRunner = std::make_unique<OpenSSL_bignum::Bit>();
+            break;
+        case    CF_CALCOP("CmpAbs(A,B)"):
+            opRunner = std::make_unique<OpenSSL_bignum::CmpAbs>();
+            break;
+        case    CF_CALCOP("ModLShift(A,B,C)"):
+            opRunner = std::make_unique<OpenSSL_bignum::ModLShift>();
+            break;
+        case    CF_CALCOP("IsPow2(A)"):
+            opRunner = std::make_unique<OpenSSL_bignum::IsPow2>();
             break;
     }
 

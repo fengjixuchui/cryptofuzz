@@ -1,75 +1,72 @@
 #include <cryptofuzz/components.h>
 #include <cryptofuzz/operations.h>
-#include <mbedtls/bignum.h>
+extern "C" {
+#include <tommath.h>
+}
 
 namespace cryptofuzz {
 namespace module {
-namespace mbedTLS_bignum {
+namespace libtommath_bignum {
 
 class Bignum {
     private:
-        mbedtls_mpi mpi;
+        mp_int mpi;
     public:
 
         Bignum(void) {
-            /* noret */ mbedtls_mpi_init(&mpi);
+            if ( mp_init(&mpi) != MP_OKAY ) {
+                throw std::exception();
+            }
         }
 
         ~Bignum() {
-            /* noret */ mbedtls_mpi_free(&mpi);
+            /* noret */ mp_clear(&mpi);
+        }
+
+
+        Bignum(const Bignum& other) {
+            if ( mp_init(&mpi) != MP_OKAY ) {
+                throw std::exception();
+            }
+            if ( mp_copy(&other.mpi, &mpi) != MP_OKAY ) {
+                throw std::exception();
+            }
+        }
+
+        Bignum(const Bignum&& other) {
+            if ( mp_init(&mpi) != MP_OKAY ) {
+                throw std::exception();
+            }
+            if ( mp_copy(&other.mpi, &mpi) != MP_OKAY ) {
+                throw std::exception();
+            }
         }
 
         bool Set(const std::string s) {
             bool ret = false;
 
-            CF_CHECK_EQ(mbedtls_mpi_read_string(&mpi, 10, s.c_str()), 0);
+            CF_CHECK_EQ(mp_read_radix(&mpi, s.c_str(), 10), MP_OKAY);
 
             ret = true;
 end:
             return ret;
         }
 
-        mbedtls_mpi* GetPtr(void) {
+        mp_int * GetPtr(void) {
             return &mpi;
-        }
-
-        std::optional<uint32_t> GetUint32(void) {
-            std::optional<uint32_t> ret = std::nullopt;
-            uint32_t out;
-
-            /* Must not be negative */
-            CF_CHECK_NE(mbedtls_mpi_cmp_int(GetPtr(), -1), 0);
-
-            /* XXX use mbedtls_mpi_write_binary on big endian systems */
-            CF_CHECK_EQ(mbedtls_mpi_write_binary_le(GetPtr(), (unsigned char*)&out, sizeof(out)), 0);
-
-            ret = out;
-
-end:
-            return ret;
-        }
-
-        std::optional<int32_t> GetInt32(void) {
-            std::optional<int32_t> ret = std::nullopt;
-            std::optional<uint32_t> u32 = GetUint32();
-            CF_CHECK_NE(u32, std::nullopt);
-            CF_CHECK_EQ(*u32 & 0x80000000, 0);
-            ret = (int64_t)(*u32);
-
-end:
-            return ret;
         }
 
         std::optional<component::Bignum> ToComponentBignum(void) {
             std::optional<component::Bignum> ret = std::nullopt;
             char* str = nullptr;
-            size_t olen;
+            size_t size;
 
-            CF_CHECK_EQ(mbedtls_mpi_write_string(&mpi, 10, nullptr, 0, &olen), MBEDTLS_ERR_MPI_BUFFER_TOO_SMALL);
+            //CF_CHECK_EQ(mp_radix_size(&mpi, 10, &size), MP_OKAY);
+            size = 8192;
 
-            str = (char*)malloc(olen);
+            str = (char*)malloc(size);
 
-            CF_CHECK_EQ(mbedtls_mpi_write_string(&mpi, 10, str, olen, &olen), 0);
+            CF_CHECK_EQ(mp_to_radix(&mpi, str, size, nullptr, 10), MP_OKAY);
 
             ret = { std::string(str) };
 end:
@@ -99,18 +96,7 @@ class Mul : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
-
 class Div : public Operation {
-    public:
-        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
-};
-
-class ExpMod : public Operation {
-    public:
-        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
-};
-
-class Sqr : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
@@ -120,42 +106,27 @@ class GCD : public Operation {
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class InvMod : public Operation {
+class LCM : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class Cmp : public Operation {
+class Mod : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class Abs : public Operation {
+class ExpMod : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class Neg : public Operation {
+class IsEven : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class RShift : public Operation {
-    public:
-        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
-};
-
-class LShift1 : public Operation {
-    public:
-        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
-};
-
-class IsNeg : public Operation {
-    public:
-        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
-};
-
-class IsEq : public Operation {
+class IsOdd : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
@@ -165,12 +136,7 @@ class IsZero : public Operation {
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class IsOne : public Operation {
-    public:
-        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
-};
-
-class MulMod : public Operation {
+class IsNeg : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
@@ -185,36 +151,66 @@ class SubMod : public Operation {
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
+class MulMod : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
+};
+
 class SqrMod : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class Bit : public Operation {
+class InvMod : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class CmpAbs : public Operation {
+class Jacobi : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class SetBit : public Operation {
+class Sqrt : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class ClearBit : public Operation {
+class Cmp : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-class Mod : public Operation {
+class Neg : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
 };
 
-} /* namespace mbedTLS_bignum */
+class Abs : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
+};
+
+class And : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
+};
+
+class Or : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
+};
+
+class Xor : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
+};
+
+class Sqr : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const override;
+};
+
+} /* namespace libtommath_bignum */
 } /* namespace module */
 } /* namespace cryptofuzz */

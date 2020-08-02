@@ -635,16 +635,21 @@ template<> std::optional<component::Bignum> ExecutorBase<component::Bignum, oper
                 return std::nullopt;
             }
             break;
+        case    CF_CALCOP("ModLShift(A,B,C)"):
+            if ( op.bn1.GetSize() > 4 ) {
+                return std::nullopt;
+            }
+            break;
     }
 
     return module->OpBignumCalc(op);
 }
 
 template <class ResultType, class OperationType>
-ExecutorBase<ResultType, OperationType>::ExecutorBase(const uint64_t operationID, const std::map<uint64_t, std::shared_ptr<Module> >& modules, const bool debug) :
+ExecutorBase<ResultType, OperationType>::ExecutorBase(const uint64_t operationID, const std::map<uint64_t, std::shared_ptr<Module> >& modules, const Options& options) :
     operationID(operationID),
     modules(modules),
-    debug(debug)
+    options(options)
 {
 }
 
@@ -823,7 +828,22 @@ OperationType ExecutorBase<ResultType, OperationType>::getOp(Datasource* parentD
 
 template <class ResultType, class OperationType>
 std::shared_ptr<Module> ExecutorBase<ResultType, OperationType>::getModule(Datasource& ds) const {
-    const auto moduleID = ds.Get<uint64_t>();
+    auto moduleID = ds.Get<uint64_t>();
+
+    /* Override the extracted module ID with the preferred one, if specified */
+    if ( options.forceModule != std::nullopt ) {
+        moduleID = *options.forceModule;
+    }
+
+    /* Skip if this is a disabled module */
+    if ( options.disableModules != std::nullopt ) {
+        if ( std::find(
+                    options.disableModules->begin(),
+                    options.disableModules->end(),
+                    moduleID) != options.disableModules->end() ) {
+            return nullptr;
+        }
+    }
 
     if ( modules.find(moduleID) == modules.end() ) {
         return nullptr;
@@ -876,7 +896,18 @@ void ExecutorBase<ResultType, OperationType>::Run(Datasource& parentDs, const ui
     {
         std::set<uint64_t> moduleIDs;
         for (const auto& m : modules ) {
-            moduleIDs.insert(m.first);
+            const auto moduleID = m.first;
+
+            /* Skip if this is a disabled module */
+            if ( options.disableModules != std::nullopt ) {
+                if ( std::find(
+                            options.disableModules->begin(),
+                            options.disableModules->end(),
+                            moduleID) != options.disableModules->end() ) {
+                    continue;
+                }
+            }
+            moduleIDs.insert(moduleID);
         }
 
         std::set<uint64_t> operationModuleIDs;
@@ -894,14 +925,11 @@ void ExecutorBase<ResultType, OperationType>::Run(Datasource& parentDs, const ui
     }
 #endif
 
-    /*
-     * Enable this to test results of min. 2 modules always
-    if ( operations.size() < 2 ) {
+    if ( operations.size() < options.minModules ) {
         return;
     }
-    */
 
-    if ( debug == true && !operations.empty() ) {
+    if ( options.debug == true && !operations.empty() ) {
         printf("Running:\n%s\n", operations[0].second.ToString().c_str());
     }
     for (size_t i = 0; i < operations.size(); i++) {
@@ -936,7 +964,7 @@ void ExecutorBase<ResultType, OperationType>::Run(Datasource& parentDs, const ui
             updateExtraCounters(module->ID, op);
         }
 
-        if ( debug == true ) {
+        if ( options.debug == true ) {
             printf("Module %s result:\n\n%s\n\n",
                     result.first->name.c_str(),
                     result.second == std::nullopt ?

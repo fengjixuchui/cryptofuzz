@@ -3,6 +3,16 @@
 #include <cryptofuzz/repository.h>
 #include <fuzzing/datasource/id.hpp>
 
+#if defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
+ #if UINTPTR_MAX != 0xFFFFFFFF
+  #error "CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED only supported on 32 bit"
+ #endif
+#endif
+
+#if defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
+#include <sys/mman.h>
+#endif
+
 extern "C" {
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/md2.h>
@@ -37,12 +47,17 @@ namespace cryptofuzz {
 namespace module {
 
 namespace wolfCrypt_detail {
-#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES) || defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
     Datasource* ds;
 #endif
 
+    std::vector<std::pair<void*, size_t>> fixed_allocs;
+
     inline void SetGlobalDs(Datasource* ds) {
-#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES) || defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
+#if defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
+        fixed_allocs.clear();
+#endif
         wolfCrypt_detail::ds = ds;
 #else
         (void)ds;
@@ -50,7 +65,7 @@ namespace wolfCrypt_detail {
     }
 
     inline void UnsetGlobalDs(void) {
-#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+#if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES) || defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
         wolfCrypt_detail::ds = nullptr;
 #endif
     }
@@ -70,17 +85,111 @@ namespace wolfCrypt_detail {
         return false;
 #endif
     }
+
+#if defined(CRYPTOFUZZ_WOLFCRYPT_MMAP_FIXED)
+    bool isFixedAlloc(const void* ptr) {
+        for (const auto& p : fixed_allocs) {
+            if ( p.first == ptr ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void* fixed_alloc(const size_t n) {
+        constexpr uint32_t top = 0xFFFFE000;
+        const uint32_t preferred = (top - n) & 0xFFFFF000;
+
+        for (const auto& p : fixed_allocs) {
+            /* If an existing pointer overlaps with the preferred pointer, revert to normal mallo */
+            if ( (void*)preferred >= p.first && (void*)preferred <= ((uint8_t*)p.first + p.second)) {
+                return util::malloc(n);
+            }
+        }
+
+        void* p = mmap(
+                (void*)preferred,
+                n,
+                PROT_READ | PROT_WRITE,
+                MAP_SHARED | MAP_FIXED | MAP_ANONYMOUS,
+                -1,
+                0);
+
+        if ( p == (void*)0xFFFFFFFF ) {
+            /* mmap failed, revert to normal malloc */
+            return util::malloc(n);
+        }
+
+        fixed_allocs.push_back({p, n});
+
+        return p;
+    }
+
+    void* malloc(const size_t n) {
+        bool doFixedMmap = false;
+        if ( ds == nullptr ) {
+            goto end;
+        }
+        try {
+            doFixedMmap = ds->Get<bool>();
+        } catch ( ... ) { }
+end:
+        return doFixedMmap ? fixed_alloc(n) : util::malloc(n);
+    }
+
+    void* realloc(void* ptr, const size_t n) {
+        if ( isFixedAlloc(ptr) ) {
+            /* realloc currently not supported for mmap'ed regions */
+            return nullptr;
+        } else {
+            return util::realloc(ptr, n);
+        }
+    }
+
+    void free(void* ptr) {
+        /* Find pointer in list */
+        for (size_t i = 0; i < fixed_allocs.size(); i++) {
+            if ( fixed_allocs[i].first == ptr ) {
+                if ( munmap(ptr, fixed_allocs[i].second) != 0 ) {
+                    abort();
+                }
+
+                /* Erase pointer from list */
+                fixed_allocs.erase(fixed_allocs.begin() + i);
+
+                return;
+            }
+        }
+
+        util::free(ptr);
+    }
+#else
+    void* malloc(const size_t n) {
+        return util::malloc(n);
+    }
+    void* realloc(void* ptr, const size_t n) {
+        return util::realloc(ptr, n);
+    }
+    void free(void* ptr) {
+        util::free(ptr);
+    }
+#endif
 }
+
 static void* wolfCrypt_custom_malloc(size_t n) {
-    return wolfCrypt_detail::AllocationFailure() ? nullptr : util::malloc(n);
+    return wolfCrypt_detail::AllocationFailure() ?
+        nullptr :
+        wolfCrypt_detail::malloc(n);
 }
 
 static void* wolfCrypt_custom_realloc(void* ptr, size_t n) {
-    return wolfCrypt_detail::AllocationFailure() ? nullptr : util::realloc(ptr, n);
+    return wolfCrypt_detail::AllocationFailure() ?
+        nullptr :
+        wolfCrypt_detail::realloc(ptr, n);
 }
 
 static void wolfCrypt_custom_free(void* ptr) {
-    util::free(ptr);
+    wolfCrypt_detail::free(ptr);
 }
 
 wolfCrypt::wolfCrypt(void) :
@@ -479,6 +588,31 @@ end:
         return LUT.at(digestType.Get());
     }
 
+    std::optional<component::Digest> DigestOneShot(operation::Digest& op) {
+        std::optional<component::Digest> ret = std::nullopt;
+
+        std::optional<wc_HashType> hashType;
+        size_t hashSize;
+        uint8_t* out = nullptr;
+
+        CF_CHECK_NE(hashType = wolfCrypt_detail::toHashType(op.digestType), std::nullopt);
+
+        hashSize = wc_HashGetDigestSize(*hashType);
+        out = util::malloc(hashSize);
+
+        CF_CHECK_EQ(wc_Hash(
+                    *hashType,
+                    op.cleartext.GetPtr(),
+                    op.cleartext.GetSize(),
+                    out,
+                    hashSize), 0);
+
+        ret = component::Digest(out, hashSize);
+end:
+        util::free(out);
+
+        return ret;
+    }
 } /* namespace wolfCrypt_detail */
 
 std::optional<component::Digest> wolfCrypt::OpDigest(operation::Digest& op) {
@@ -486,52 +620,61 @@ std::optional<component::Digest> wolfCrypt::OpDigest(operation::Digest& op) {
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
     wolfCrypt_detail::SetGlobalDs(&ds);
 
-    switch ( op.digestType.Get() ) {
-        case CF_DIGEST("MD2"):
-            ret = wolfCrypt_detail::md2.Run(op, ds);
-            break;
-        case CF_DIGEST("MD4"):
-            ret = wolfCrypt_detail::md4.Run(op, ds);
-            break;
-        case CF_DIGEST("MD5"):
-            ret = wolfCrypt_detail::md5.Run(op, ds);
-            break;
-        case CF_DIGEST("RIPEMD160"):
-            ret = wolfCrypt_detail::ripemd160.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA1"):
-            ret = wolfCrypt_detail::sha1.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA224"):
-            ret = wolfCrypt_detail::sha224.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA256"):
-            ret = wolfCrypt_detail::sha256.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA384"):
-            ret = wolfCrypt_detail::sha384.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA512"):
-            ret = wolfCrypt_detail::sha512.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA3-224"):
-            ret = wolfCrypt_detail::sha3_224.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA3-256"):
-            ret = wolfCrypt_detail::sha3_256.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA3-384"):
-            ret = wolfCrypt_detail::sha3_384.Run(op, ds);
-            break;
-        case CF_DIGEST("SHA3-512"):
-            ret = wolfCrypt_detail::sha3_512.Run(op, ds);
-            break;
-        case CF_DIGEST("BLAKE2B512"):
-            ret = wolfCrypt_detail::blake2b512.Run(op, ds);
-            break;
-        case CF_DIGEST("BLAKE2S256"):
-            ret = wolfCrypt_detail::blake2s256.Run(op, ds);
-            break;
+    bool useOneShot = false;
+    try {
+        useOneShot = ds.Get<bool>();
+    } catch ( ... ) { }
+
+    if ( useOneShot == true ) {
+        ret = wolfCrypt_detail::DigestOneShot(op);
+    } else {
+        switch ( op.digestType.Get() ) {
+            case CF_DIGEST("MD2"):
+                ret = wolfCrypt_detail::md2.Run(op, ds);
+                break;
+            case CF_DIGEST("MD4"):
+                ret = wolfCrypt_detail::md4.Run(op, ds);
+                break;
+            case CF_DIGEST("MD5"):
+                ret = wolfCrypt_detail::md5.Run(op, ds);
+                break;
+            case CF_DIGEST("RIPEMD160"):
+                ret = wolfCrypt_detail::ripemd160.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA1"):
+                ret = wolfCrypt_detail::sha1.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA224"):
+                ret = wolfCrypt_detail::sha224.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA256"):
+                ret = wolfCrypt_detail::sha256.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA384"):
+                ret = wolfCrypt_detail::sha384.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA512"):
+                ret = wolfCrypt_detail::sha512.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA3-224"):
+                ret = wolfCrypt_detail::sha3_224.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA3-256"):
+                ret = wolfCrypt_detail::sha3_256.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA3-384"):
+                ret = wolfCrypt_detail::sha3_384.Run(op, ds);
+                break;
+            case CF_DIGEST("SHA3-512"):
+                ret = wolfCrypt_detail::sha3_512.Run(op, ds);
+                break;
+            case CF_DIGEST("BLAKE2B512"):
+                ret = wolfCrypt_detail::blake2b512.Run(op, ds);
+                break;
+            case CF_DIGEST("BLAKE2S256"):
+                ret = wolfCrypt_detail::blake2s256.Run(op, ds);
+                break;
+        }
     }
 
     wolfCrypt_detail::UnsetGlobalDs();

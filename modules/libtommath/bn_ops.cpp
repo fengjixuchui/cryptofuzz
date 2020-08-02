@@ -3,33 +3,10 @@
 #include <fuzzing/datasource/id.hpp>
 
 #include "bn_ops.h"
-extern "C" {
-#include <ecl/ecl-priv.h>
-}
 
 namespace cryptofuzz {
 namespace module {
-namespace NSS_bignum {
-
-ECGroup* nist_p256 = nullptr;
-ECGroup* nist_p384 = nullptr;
-ECGroup* nist_p521 = nullptr;
-
-void Initialize(void) {
-    bool ok = false;
-
-    CF_CHECK_NE(nist_p256 = ECGroup_fromName(ECCurve_NIST_P256), nullptr);
-    CF_CHECK_NE(nist_p384 = ECGroup_fromName(ECCurve_NIST_P384), nullptr);
-    CF_CHECK_NE(nist_p521 = ECGroup_fromName(ECCurve_NIST_P521), nullptr);
-
-    ok = true;
-
-end:
-    if ( ok != true ) {
-        printf("Cannot initialize NSS bignum submodule\n");
-        abort();
-    }
-}
+namespace libtommath_bignum {
 
 bool Add::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
@@ -79,11 +56,23 @@ end:
     return ret;
 }
 
-bool Sqr::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool GCD::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(mp_sqr(bn[0].GetPtr(), res.GetPtr()), MP_OKAY);
+    CF_CHECK_EQ(mp_gcd(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
+
+    ret = true;
+
+end:
+    return ret;
+}
+
+bool LCM::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+    (void)ds;
+    bool ret = false;
+
+    CF_CHECK_EQ(mp_lcm(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
 
@@ -107,11 +96,8 @@ bool ExpMod::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    Bignum zero;
-    mp_zero(zero.GetPtr());
-    if ( mp_cmp(zero.GetPtr(), bn[0].GetPtr()) == 0 ) {
-        goto end;
-    }
+    /* XXX bug */
+    CF_CHECK_EQ(mp_iszero(bn[1].GetPtr()), 0);
 
     CF_CHECK_EQ(mp_exptmod(bn[0].GetPtr(), bn[1].GetPtr(), bn[2].GetPtr(), res.GetPtr()), MP_OKAY);
 
@@ -121,16 +107,36 @@ end:
     return ret;
 }
 
-bool GCD::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool IsEven::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
-    bool ret = false;
 
-    CF_CHECK_EQ(mp_gcd(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
+    res.Set( std::to_string(mp_iseven(bn[0].GetPtr())) );
 
-    ret = true;
+    return true;
+}
 
-end:
-    return ret;
+bool IsOdd::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+    (void)ds;
+
+    res.Set( std::to_string(mp_isodd(bn[0].GetPtr())) );
+
+    return true;
+}
+
+bool IsZero::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+    (void)ds;
+
+    res.Set( std::to_string(mp_iszero(bn[0].GetPtr())) );
+
+    return true;
+}
+
+bool IsNeg::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+    (void)ds;
+
+    res.Set( std::to_string(mp_isneg(bn[0].GetPtr())) );
+
+    return true;
 }
 
 bool AddMod::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
@@ -193,11 +199,26 @@ end:
     return ret;
 }
 
-bool LCM::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool Jacobi::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(mp_lcm(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
+    int result;
+    CF_CHECK_EQ(mp_kronecker(bn[0].GetPtr(), bn[1].GetPtr(), &result), MP_OKAY);
+
+    res.Set( std::to_string(result) );
+
+    ret = true;
+
+end:
+    return ret;
+}
+
+bool Sqrt::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+    (void)ds;
+    bool ret = false;
+
+    CF_CHECK_EQ(mp_sqrt(bn[0].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
 
@@ -209,19 +230,8 @@ bool Cmp::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
 
     res.Set( std::to_string(mp_cmp(bn[0].GetPtr(), bn[1].GetPtr())) );
+
     return true;
-}
-
-bool Abs::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
-    (void)ds;
-    bool ret = false;
-
-    CF_CHECK_EQ(mp_abs(bn[0].GetPtr(), res.GetPtr()), MP_OKAY);
-
-    ret = true;
-
-end:
-    return ret;
 }
 
 bool Neg::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
@@ -236,29 +246,11 @@ end:
     return ret;
 }
 
-bool IsEven::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
-    (void)ds;
-    (void)res;
-
-    res.Set( std::to_string(mp_iseven(bn[0].GetPtr()) ? 1 : 0) );
-
-    return true;
-}
-
-bool IsOdd::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
-    (void)ds;
-    (void)res;
-
-    res.Set( std::to_string(mp_isodd(bn[0].GetPtr()) ? 1 : 0) );
-
-    return true;
-}
-
-bool Exp::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool Abs::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(mp_expt(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
+    CF_CHECK_EQ(mp_abs(bn[0].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
 
@@ -266,11 +258,11 @@ end:
     return ret;
 }
 
-bool Mod_NIST_256::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool And::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(nist_p256->meth->field_mod(bn[0].GetPtr(), res.GetPtr(), nist_p256->meth), MP_OKAY);
+    CF_CHECK_EQ(mp_and(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
 
@@ -278,11 +270,11 @@ end:
     return ret;
 }
 
-bool Mod_NIST_384::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool Or::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(nist_p384->meth->field_mod(bn[0].GetPtr(), res.GetPtr(), nist_p384->meth), MP_OKAY);
+    CF_CHECK_EQ(mp_or(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
 
@@ -290,11 +282,11 @@ end:
     return ret;
 }
 
-bool Mod_NIST_521::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+bool Xor::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(nist_p521->meth->field_mod(bn[0].GetPtr(), res.GetPtr(), nist_p521->meth), MP_OKAY);
+    CF_CHECK_EQ(mp_xor(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
 
@@ -302,6 +294,18 @@ end:
     return ret;
 }
 
-} /* namespace NSS_bignum */
+bool Sqr::Run(Datasource& ds, Bignum& res, std::vector<Bignum>& bn) const {
+    (void)ds;
+    bool ret = false;
+
+    CF_CHECK_EQ(mp_sqr(bn[0].GetPtr(), res.GetPtr()), MP_OKAY);
+
+    ret = true;
+
+end:
+    return ret;
+}
+
+} /* namespace libtommath_bignum */
 } /* namespace module */
 } /* namespace cryptofuzz */
