@@ -6,6 +6,9 @@ extern "C" {
 #include <wolfssl/options.h>
 #include <wolfssl/wolfcrypt/integer.h>
 #include <wolfssl/wolfcrypt/ecc.h>
+#if defined(WOLFSSL_SP_MATH)
+ #include <wolfssl/wolfcrypt/sp.h>
+#endif
 }
 
 namespace cryptofuzz {
@@ -140,21 +143,31 @@ end:
             std::optional<std::string> ret = std::nullopt;
             char* str = nullptr;
 
-            str = (char*)malloc(8192);
 
 #if defined(WOLFSSL_SP_MATH)
+            str = (char*)util::malloc(8192);
+
             CF_CHECK_EQ(mp_tohex(mp, str), MP_OKAY);
             ret = { util::HexToDec(str) };
 #else
             bool hex = false;
+            int size;
+
             try {
                 hex = ds.Get<bool>();
             } catch ( ... ) { }
 
+
             if ( hex == true ) {
+                CF_CHECK_EQ(mp_radix_size(mp, 16, &size), MP_OKAY);
+                str = (char*)util::malloc(size+1/*XXX ZD 10901*/);
+
                 CF_CHECK_EQ(mp_tohex(mp, str), MP_OKAY);
                 ret = { util::HexToDec(str) };
             } else {
+                CF_CHECK_EQ(mp_radix_size(mp, 10, &size), MP_OKAY);
+                str = (char*)util::malloc(size);
+
                 CF_CHECK_EQ(mp_toradix(mp, str, 10), MP_OKAY);
                 ret = std::string(str);
             }
@@ -221,6 +234,10 @@ class BignumCluster {
             }
 
             return bn[index].Set(s);
+        }
+
+        mp_int* GetDestPtr(const size_t index) {
+            return bn[index].GetPtr();
         }
 };
 
