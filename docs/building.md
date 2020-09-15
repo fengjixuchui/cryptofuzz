@@ -55,6 +55,10 @@ Available library-specific build instructions:
  - [libgcrypt](libgcrypt.md)
  - [Linux crypto api](linux.md)
  - [SymCrypt](symcrypt.md)
+ - [bn.js](bn.js.md)
+ - [bignumber.js](bignumber.js.md)
+ - [crypto-js](crypto-js.md)
+ - [sjcl](sjcl.md)
 
 ## 3. Building Cryptofuzz
 

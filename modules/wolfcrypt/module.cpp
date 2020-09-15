@@ -227,24 +227,35 @@ namespace wolfCrypt_detail {
             virtual bool runUpdate(util::Multipart& parts) = 0;
             virtual std::optional<ReturnType> runFinalize(void) = 0;
             virtual void runFree(void) = 0;
+            virtual std::optional<ReturnType> runOneShot(const Buffer& in) = 0;
 
             std::optional<ReturnType> Run(OperationType& op, Datasource& ds) {
                 std::optional<ReturnType> ret = std::nullopt;
-                //Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
                 util::Multipart parts;
 
-                if ( runInit(op) == false ) {
-                    return std::nullopt;
+                bool doOneShot = false;
+                try {
+                    doOneShot = ds.Get<bool>();
+                } catch ( ... ) { }
+
+                if ( doOneShot == true ) {
+                    ret = runOneShot(op.cleartext);
+                } else {
+                    if ( runInit(op) == false ) {
+                        return std::nullopt;
+                    }
+
+                    parts = util::ToParts(ds, op.cleartext);
+
+                    CF_CHECK_EQ(runUpdate(parts), true);
+
+                    ret = runFinalize();
                 }
 
-                parts = util::ToParts(ds, op.cleartext);
-
-                CF_CHECK_EQ(runUpdate(parts), true);
-
-                ret = runFinalize();
-
 end:
-                runFree();
+                if ( doOneShot == false ) {
+                    runFree();
+                }
                 return ret;
             }
     };
@@ -454,18 +465,39 @@ end:
             UpdateType update;
             FinalizeType finalize;
             void (*freeCTX)(CTXType*);
+            int (*copy)(CTXType*, CTXType*);
+            int (*oneShot)(const byte*, word32, byte*);
+            CTXType* getCtx(void) {
+                bool doCopy = false;
+                try {
+                    doCopy = ds->Get<bool>();
+                } catch ( ... ) { }
+                if ( doCopy ) {
+                    if ( copy != nullptr ) {
+                        CTXType dest;
+                        if ( copy(&this->ctx, &dest) == 0 ) {
+                            memcpy(&this->ctx, &dest, sizeof(CTXType));
+                        }
+                    }
+                }
+                return &this->ctx;
+            }
         public:
             Digest(
                 typename InitType::FnType initFn,
                 typename UpdateType::FnType updateFn,
                 typename FinalizeType::FnType finalizeFn,
-                void (*freeCTX)(CTXType*) = nullptr
+                void (*freeCTX)(CTXType*) = nullptr,
+                int (*copy)(CTXType*, CTXType*) = nullptr,
+                int (*oneShot)(const byte*, word32, byte*) = nullptr
             ) :
                 Operation<operation::Digest, component::Digest, CTXType>(),
                 init(initFn),
                 update(updateFn),
                 finalize(finalizeFn),
-                freeCTX(freeCTX)
+                freeCTX(freeCTX),
+                copy(copy),
+                oneShot(oneShot)
             { }
 
             bool runInit(operation::Digest& op) override {
@@ -475,7 +507,7 @@ end:
 
             bool runUpdate(util::Multipart& parts) override {
                 for (const auto& part : parts) {
-                    if ( update.Update(&this->ctx, part.first, part.second) == false ) {
+                    if ( update.Update(getCtx(), part.first, part.second) == false ) {
                         return false;
                     }
                 }
@@ -486,7 +518,7 @@ end:
             std::optional<component::Digest> runFinalize(void) override {
                 std::vector<uint8_t> ret(DigestSize);
 
-                if ( finalize.Finalize(&this->ctx, ret.data()) == false ) {
+                if ( finalize.Finalize(getCtx(), ret.data()) == false ) {
                     return std::nullopt;
                 }
 
@@ -498,47 +530,60 @@ end:
                     freeCTX(&this->ctx);
                 }
             }
+
+            std::optional<component::Digest> runOneShot(const Buffer& in) override {
+                std::optional<component::Digest> ret = std::nullopt;
+                std::vector<uint8_t> out(DigestSize);
+
+                CF_CHECK_NE(oneShot, nullptr);
+
+                CF_CHECK_EQ(oneShot(in.GetPtr(), in.GetSize() ,out.data()), 0);
+
+                ret = component::Digest(out.data(), out.size());
+end:
+                return ret;
+            }
     };
 
 
     Digest<Md2, MD2_DIGEST_SIZE, Init_Void<Md2>, DigestUpdate_Void<Md2>, DigestFinalize_Void<Md2>>
-        md2(wc_InitMd2, wc_Md2Update, wc_Md2Final);
+        md2(wc_InitMd2, wc_Md2Update, wc_Md2Final, nullptr, nullptr, wc_Md2Hash);
 
     Digest<Md4, MD4_DIGEST_SIZE, Init_Void<Md4>, DigestUpdate_Void<Md4>, DigestFinalize_Void<Md4>>
         md4(wc_InitMd4, wc_Md4Update, wc_Md4Final);
 
     Digest<Md5, MD5_DIGEST_SIZE, Init_IntParams<Md5>, DigestUpdate_Int<Md5>, DigestFinalize_Int<Md5>>
-        md5(wc_InitMd5_ex, wc_Md5Update, wc_Md5Final, wc_Md5Free);
+        md5(wc_InitMd5_ex, wc_Md5Update, wc_Md5Final, wc_Md5Free, wc_Md5Copy, wc_Md5Hash);
 
     Digest<RipeMd, RIPEMD_DIGEST_SIZE, Init_Int<RipeMd>, DigestUpdate_Int<RipeMd>, DigestFinalize_Int<RipeMd>>
         ripemd160(wc_InitRipeMd, wc_RipeMdUpdate, wc_RipeMdFinal);
 
     Digest<Sha, WC_SHA_DIGEST_SIZE, Init_Int<Sha>, DigestUpdate_Int<Sha>, DigestFinalize_Int<Sha>>
-        sha1(wc_InitSha, wc_ShaUpdate, wc_ShaFinal, wc_ShaFree);
+        sha1(wc_InitSha, wc_ShaUpdate, wc_ShaFinal, wc_ShaFree, wc_ShaCopy, wc_ShaHash);
 
     Digest<Sha224, WC_SHA224_DIGEST_SIZE, Init_Int<Sha224>, DigestUpdate_Int<Sha224>, DigestFinalize_Int<Sha224>>
-        sha224(wc_InitSha224, wc_Sha224Update, wc_Sha224Final, wc_Sha224Free);
+        sha224(wc_InitSha224, wc_Sha224Update, wc_Sha224Final, wc_Sha224Free, wc_Sha224Copy, wc_Sha224Hash);
 
     Digest<Sha256, WC_SHA256_DIGEST_SIZE, Init_Int<Sha256>, DigestUpdate_Int<Sha256>, DigestFinalize_Int<Sha256>>
-        sha256(wc_InitSha256, wc_Sha256Update, wc_Sha256Final, wc_Sha256Free);
+        sha256(wc_InitSha256, wc_Sha256Update, wc_Sha256Final, wc_Sha256Free, wc_Sha256Copy, wc_Sha256Hash);
 
     Digest<Sha384, WC_SHA384_DIGEST_SIZE, Init_Int<Sha384>, DigestUpdate_Int<Sha384>, DigestFinalize_Int<Sha384>>
-        sha384(wc_InitSha384, wc_Sha384Update, wc_Sha384Final, wc_Sha384Free);
+        sha384(wc_InitSha384, wc_Sha384Update, wc_Sha384Final, wc_Sha384Free, wc_Sha384Copy, wc_Sha384Hash);
 
     Digest<Sha512, WC_SHA512_DIGEST_SIZE, Init_Int<Sha512>, DigestUpdate_Int<Sha512>, DigestFinalize_Int<Sha512>>
-        sha512(wc_InitSha512, wc_Sha512Update, wc_Sha512Final, wc_Sha512Free);
+        sha512(wc_InitSha512, wc_Sha512Update, wc_Sha512Final, wc_Sha512Free, wc_Sha512Copy, wc_Sha512Hash);
 
     Digest<Sha3, WC_SHA3_224_DIGEST_SIZE, Init_IntParams<Sha3>, DigestUpdate_Int<Sha3>, DigestFinalize_Int<Sha3>>
-        sha3_224(wc_InitSha3_224, wc_Sha3_224_Update, wc_Sha3_224_Final, wc_Sha3_224_Free);
+        sha3_224(wc_InitSha3_224, wc_Sha3_224_Update, wc_Sha3_224_Final, wc_Sha3_224_Free, wc_Sha3_224_Copy, wc_Sha3_224Hash);
 
     Digest<Sha3, WC_SHA3_256_DIGEST_SIZE, Init_IntParams<Sha3>, DigestUpdate_Int<Sha3>, DigestFinalize_Int<Sha3>>
-        sha3_256(wc_InitSha3_256, wc_Sha3_256_Update, wc_Sha3_256_Final, wc_Sha3_256_Free);
+        sha3_256(wc_InitSha3_256, wc_Sha3_256_Update, wc_Sha3_256_Final, wc_Sha3_256_Free, wc_Sha3_256_Copy, wc_Sha3_256Hash);
 
     Digest<Sha3, WC_SHA3_384_DIGEST_SIZE, Init_IntParams<Sha3>, DigestUpdate_Int<Sha3>, DigestFinalize_Int<Sha3>>
-        sha3_384(wc_InitSha3_384, wc_Sha3_384_Update, wc_Sha3_384_Final, wc_Sha3_384_Free);
+        sha3_384(wc_InitSha3_384, wc_Sha3_384_Update, wc_Sha3_384_Final, wc_Sha3_384_Free, wc_Sha3_384_Copy, wc_Sha3_384Hash);
 
     Digest<Sha3, WC_SHA3_512_DIGEST_SIZE, Init_IntParams<Sha3>, DigestUpdate_Int<Sha3>, DigestFinalize_Int<Sha3>>
-        sha3_512(wc_InitSha3_512, wc_Sha3_512_Update, wc_Sha3_512_Final, wc_Sha3_512_Free);
+        sha3_512(wc_InitSha3_512, wc_Sha3_512_Update, wc_Sha3_512_Final, wc_Sha3_512_Free, wc_Sha3_512_Copy, wc_Sha3_512Hash);
 
     Digest<Blake2b, 64, Init_IntFixedParam<Blake2b, 64>, DigestUpdate_Int<Blake2b>, DigestFinalize_IntFixedParam<Blake2b, 64>>
         blake2b512(wc_InitBlake2b, wc_Blake2bUpdate, wc_Blake2bFinal);
@@ -547,7 +592,7 @@ end:
         blake2s256(wc_InitBlake2s, wc_Blake2sUpdate, wc_Blake2sFinal);
 
     Digest<wc_Shake, 32, Init_IntParams<wc_Shake>, DigestUpdate_Int<wc_Shake>, DigestFinalize_IntFixedParam<wc_Shake, 32>>
-        shake512(wc_InitShake256, wc_Shake256_Update, wc_Shake256_Final, wc_Shake256_Free);
+        shake512(wc_InitShake256, wc_Shake256_Update, wc_Shake256_Final, wc_Shake256_Free, wc_Shake256_Copy);
 
     std::optional<wc_HashType> toHashType(const component::DigestType& digestType) {
         using fuzzing::datasource::ID;
@@ -964,6 +1009,8 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
         case CF_CIPHER("AES_256_CTR"):
         {
             Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             switch ( op.cipher.cipherType.Get() ) {
                 case CF_CIPHER("AES_128_CTR"):
@@ -985,9 +1032,50 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
 
             CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
-            CF_CHECK_EQ(wc_AesCtrEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.cleartext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCtrEncrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_ECB"):
+        case CF_CIPHER("AES_192_ECB"):
+        case CF_CIPHER("AES_256_ECB"):
+        {
+#if defined(HAVE_AES_ECB)
+            Aes ctx;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_ECB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_ECB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_ECB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+            CF_CHECK_GT(op.cipher.key.GetSize(), 0);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+
+            /* Note: wc_AesEcbEncrypt does not support streaming */
+            CF_CHECK_EQ(wc_AesEcbEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+#endif
         }
         break;
 
@@ -1001,6 +1089,7 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
             out = util::malloc(op.cleartext.GetSize());
 
             CF_CHECK_EQ(wc_Hc128_SetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.iv.GetPtr()), 0);
+
             CF_CHECK_EQ(wc_Hc128_Process(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
@@ -1041,6 +1130,8 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
         case CF_CIPHER("AES_256_CFB"):
         {
             Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             switch ( op.cipher.cipherType.Get() ) {
                 case CF_CIPHER("AES_128_CFB"):
@@ -1061,7 +1152,88 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
 
             CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
-            CF_CHECK_EQ(wc_AesCfbEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.cleartext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCfbEncrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_CFB1"):
+        case CF_CIPHER("AES_192_CFB1"):
+        case CF_CIPHER("AES_256_CFB1"):
+        {
+            Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_CFB1"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_CFB1"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_CFB1"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+
+            parts = util::ToParts(ds, op.cleartext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCfb1Encrypt(&ctx, out + outIdx, part.first, part.second * 8), 0);
+                outIdx += part.second;
+            }
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_CFB8"):
+        case CF_CIPHER("AES_192_CFB8"):
+        case CF_CIPHER("AES_256_CFB8"):
+        {
+            Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_CFB8"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_CFB8"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_CFB8"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+
+            parts = util::ToParts(ds, op.cleartext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCfb8Encrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
         }
@@ -1072,6 +1244,8 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
         case CF_CIPHER("AES_256_OFB"):
         {
             Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             switch ( op.cipher.cipherType.Get() ) {
                 case CF_CIPHER("AES_128_OFB"):
@@ -1092,7 +1266,12 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
 
             CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
-            CF_CHECK_EQ(wc_AesOfbEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.cleartext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesOfbEncrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
         }
@@ -1128,6 +1307,7 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
                         &ctx,
                         op.cipher.key.GetPtr(),
                         op.cipher.iv.GetPtr()), 0);
+
             CF_CHECK_EQ(wc_RabbitProcess(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
@@ -1137,6 +1317,8 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
         case CF_CIPHER("CHACHA20"):
         {
             ChaCha ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             CF_CHECK_EQ(op.cipher.iv.GetSize(), CHACHA_IV_BYTES);
 
@@ -1144,7 +1326,12 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
 
             CF_CHECK_EQ(wc_Chacha_SetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize()), 0);
             CF_CHECK_EQ(wc_Chacha_SetIV(&ctx, op.cipher.iv.GetPtr(), 0), 0);
-            CF_CHECK_EQ(wc_Chacha_Process(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.cleartext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_Chacha_Process(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
         }
@@ -1200,6 +1387,25 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
         }
         break;
 
+        case CF_CIPHER("DES_ECB"):
+        {
+#if defined(WOLFSSL_DES_ECB)
+            Des ctx;
+
+            CF_CHECK_EQ(op.cipher.key.GetSize(), 8);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 8);
+            CF_CHECK_EQ(op.cleartext.GetSize() % 8, 0);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            CF_CHECK_EQ(wc_Des_SetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.iv.GetPtr(), DES_ENCRYPTION), 0);
+            CF_CHECK_EQ(wc_Des_EcbEncrypt(&ctx, out, op.cleartext.GetPtr(), op.cleartext.GetSize()), 0);
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+#endif
+        }
+        break;
+
         case CF_CIPHER("AES_128_WRAP"):
         case CF_CIPHER("AES_192_WRAP"):
         case CF_CIPHER("AES_256_WRAP"):
@@ -1216,6 +1422,34 @@ std::optional<component::Ciphertext> wolfCrypt::OpSymmetricEncrypt(operation::Sy
                         op.cipher.iv.GetPtr()), 0);
 
             ret = component::Ciphertext(Buffer(out, outSize));
+        }
+        break;
+
+        case CF_CIPHER("GMAC_128"):
+        case CF_CIPHER("GMAC_192"):
+        case CF_CIPHER("GMAC_256"):
+        {
+
+            CF_CHECK_NE(op.tagSize, std::nullopt);
+            CF_CHECK_NE(op.aad, std::nullopt);
+
+            outTag = util::malloc(*op.tagSize);
+            const auto partsAAD = util::ToParts(ds, *op.aad);
+
+            Gmac ctx;
+            CF_CHECK_EQ(wc_AesInit(&ctx.aes, NULL, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_GmacSetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize()), 0);
+            CF_CHECK_EQ(wc_GmacUpdate(&ctx,
+                        op.cipher.iv.GetPtr(),
+                        op.cipher.iv.GetSize(),
+                        op.aad->GetPtr(),
+                        op.aad->GetSize(),
+                        outTag, *op.tagSize), 0);
+            wc_AesFree(&ctx.aes);
+
+            ret = component::Ciphertext(
+                    Buffer(op.cleartext.GetPtr(), op.cleartext.GetSize()),
+                    Buffer(outTag, *op.tagSize));
         }
         break;
     }
@@ -1449,6 +1683,8 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
         case CF_CIPHER("AES_256_CTR"):
         {
             Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             switch ( op.cipher.cipherType.Get() ) {
                 case CF_CIPHER("AES_128_CTR"):
@@ -1470,9 +1706,50 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 
             CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
-            CF_CHECK_EQ(wc_AesCtrEncrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.ciphertext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCtrEncrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_ECB"):
+        case CF_CIPHER("AES_192_ECB"):
+        case CF_CIPHER("AES_256_ECB"):
+        {
+#if defined(HAVE_AES_ECB)
+            Aes ctx;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_ECB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_ECB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_ECB"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+            CF_CHECK_GT(op.cipher.key.GetSize(), 0);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_DECRYPTION), 0);
+
+            /* Note: wc_AesEcbDecrypt does not support streaming */
+            CF_CHECK_EQ(wc_AesEcbDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+#endif
         }
         break;
 
@@ -1526,6 +1803,8 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
         case CF_CIPHER("AES_256_CFB"):
         {
             Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             switch ( op.cipher.cipherType.Get() ) {
                 case CF_CIPHER("AES_128_CFB"):
@@ -1547,7 +1826,90 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 
             CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
-            CF_CHECK_EQ(wc_AesCfbDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.ciphertext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCfbDecrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_CFB1"):
+        case CF_CIPHER("AES_192_CFB1"):
+        case CF_CIPHER("AES_256_CFB1"):
+        {
+            Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_CFB1"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_CFB1"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_CFB1"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+            CF_CHECK_GT(op.cipher.key.GetSize(), 0);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+
+            parts = util::ToParts(ds, op.ciphertext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCfb1Decrypt(&ctx, out + outIdx, part.first, part.second * 8), 0);
+                outIdx += part.second;
+            }
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("AES_128_CFB8"):
+        case CF_CIPHER("AES_192_CFB8"):
+        case CF_CIPHER("AES_256_CFB8"):
+        {
+            Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
+
+            switch ( op.cipher.cipherType.Get() ) {
+                case CF_CIPHER("AES_128_CFB8"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 16);
+                    break;
+                case CF_CIPHER("AES_192_CFB8"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 24);
+                    break;
+                case CF_CIPHER("AES_256_CFB8"):
+                    CF_CHECK_EQ(op.cipher.key.GetSize(), 32);
+                    break;
+            }
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % 16, 0);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+            CF_CHECK_GT(op.cipher.key.GetSize(), 0);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
+            CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
+
+            parts = util::ToParts(ds, op.ciphertext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesCfb8Decrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
         }
@@ -1558,6 +1920,8 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
         case CF_CIPHER("AES_256_OFB"):
         {
             Aes ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             switch ( op.cipher.cipherType.Get() ) {
                 case CF_CIPHER("AES_128_OFB"):
@@ -1579,7 +1943,12 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 
             CF_CHECK_EQ(wc_AesInit(&ctx, nullptr, INVALID_DEVID), 0);
             CF_CHECK_EQ(wc_AesSetKeyDirect(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), op.cipher.iv.GetPtr(), AES_ENCRYPTION), 0);
-            CF_CHECK_EQ(wc_AesOfbDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.ciphertext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_AesOfbDecrypt(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
         }
@@ -1624,6 +1993,8 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
         case CF_CIPHER("CHACHA20"):
         {
             ChaCha ctx;
+            util::Multipart parts;
+            size_t outIdx = 0;
 
             CF_CHECK_EQ(op.cipher.iv.GetSize(), CHACHA_IV_BYTES);
 
@@ -1631,7 +2002,12 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
 
             CF_CHECK_EQ(wc_Chacha_SetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize()), 0);
             CF_CHECK_EQ(wc_Chacha_SetIV(&ctx, op.cipher.iv.GetPtr(), 0), 0);
-            CF_CHECK_EQ(wc_Chacha_Process(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            parts = util::ToParts(ds, op.ciphertext);
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_Chacha_Process(&ctx, out + outIdx, part.first, part.second), 0);
+                outIdx += part.second;
+            }
 
             ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
         }
@@ -1690,6 +2066,25 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
         }
         break;
 
+        case CF_CIPHER("DES_ECB"):
+        {
+#if defined(WOLFSSL_DES_ECB)
+            Des ctx;
+
+            CF_CHECK_EQ(op.cipher.key.GetSize(), 8);
+            CF_CHECK_EQ(op.cipher.iv.GetSize(), 8);
+            CF_CHECK_EQ(op.ciphertext.GetSize() % 8, 0);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            CF_CHECK_EQ(wc_Des_SetKey(&ctx, op.cipher.key.GetPtr(), op.cipher.iv.GetPtr(), DES_DECRYPTION), 0);
+            CF_CHECK_EQ(wc_Des_EcbDecrypt(&ctx, out, op.ciphertext.GetPtr(), op.ciphertext.GetSize()), 0);
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+#endif
+        }
+        break;
+
         case CF_CIPHER("AES_128_WRAP"):
         case CF_CIPHER("AES_192_WRAP"):
         case CF_CIPHER("AES_256_WRAP"):
@@ -1706,6 +2101,27 @@ std::optional<component::Cleartext> wolfCrypt::OpSymmetricDecrypt(operation::Sym
                         op.cipher.iv.GetPtr()), 0);
 
             ret = component::Cleartext(Buffer(out, outSize));
+        }
+        break;
+
+        case CF_CIPHER("GMAC_128"):
+        case CF_CIPHER("GMAC_192"):
+        case CF_CIPHER("GMAC_256"):
+        {
+            CF_CHECK_NE(op.tag, std::nullopt);
+            CF_CHECK_NE(op.aad, std::nullopt);
+
+            CF_CHECK_EQ(wc_GmacVerify(
+                        op.cipher.key.GetPtr(),
+                        op.cipher.key.GetSize(),
+                        op.cipher.iv.GetPtr(),
+                        op.cipher.iv.GetSize(),
+                        op.aad->GetPtr(),
+                        op.aad->GetSize(),
+                        op.tag->GetPtr(),
+                        op.tag->GetSize()), 0);
+
+            ret = component::Cleartext(Buffer(op.ciphertext.GetPtr(), op.ciphertext.GetSize()));
         }
         break;
     }

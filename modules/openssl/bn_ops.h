@@ -1,6 +1,7 @@
 #include <cryptofuzz/components.h>
 #include <cryptofuzz/operations.h>
 #include <openssl/bn.h>
+#include <openssl/asn1.h>
 #if defined(CRYPTOFUZZ_BORINGSSL)
 #include <openssl/mem.h>
 #endif
@@ -78,36 +79,63 @@ end:
         }
 
         std::optional<uint64_t> AsUint64(void) const {
+            std::optional<uint64_t> ret = std::nullopt;
+            try {
+                switch ( ds.Get<uint8_t>() ) {
+                    case    0:
 #if !defined(CRYPTOFUZZ_LIBRESSL)
-            std::optional<uint64_t> ret;
-            uint64_t v;
+                        {
+                            /* BN_bn2binpad is not supported by LibreSSL */
 
-            CF_CHECK_LTE(BN_num_bytes(bn), (int)sizeof(uint64_t));
-            CF_CHECK_NE(BN_bn2binpad(bn, (unsigned char*)&v, sizeof(v)), -1);
+                            uint64_t v;
 
-            /* Manual reversing is required because
-             * BN_bn2lebinpad is not supported by BoringSSL.
-             *
-             * TODO This must be omitted on big-endian platforms.
-             */
-            v =
-                ((v & 0xFF00000000000000) >> 56) |
-                ((v & 0x00FF000000000000) >> 40) |
-                ((v & 0x0000FF0000000000) >> 24) |
-                ((v & 0x000000FF00000000) >>  8) |
-                ((v & 0x00000000FF000000) <<  8) |
-                ((v & 0x0000000000FF0000) << 24) |
-                ((v & 0x000000000000FF00) << 40) |
-                ((v & 0x00000000000000FF) << 56);
+                            CF_CHECK_LTE(BN_num_bytes(bn), (int)sizeof(uint64_t));
+                            CF_CHECK_NE(BN_bn2binpad(bn, (unsigned char*)&v, sizeof(v)), -1);
 
-            ret = v;
-end:
+                            /* Manual reversing is required because
+                             * BN_bn2lebinpad is not supported by BoringSSL.
+                             *
+                             * TODO This must be omitted on big-endian platforms.
+                             */
+                            v =
+                                ((v & 0xFF00000000000000) >> 56) |
+                                ((v & 0x00FF000000000000) >> 40) |
+                                ((v & 0x0000FF0000000000) >> 24) |
+                                ((v & 0x000000FF00000000) >>  8) |
+                                ((v & 0x00000000FF000000) <<  8) |
+                                ((v & 0x0000000000FF0000) << 24) |
+                                ((v & 0x000000000000FF00) << 40) |
+                                ((v & 0x00000000000000FF) << 56);
 
-            return ret;
-#else
-            /* BN_bn2binpad is not supported by LibreSSL */
-            return std::nullopt;
+                            ret = v;
+                        }
 #endif
+                        break;
+                    case    1:
+#if !defined(CRYPTOFUZZ_LIBRESSL) && !defined(CRYPTOFUZZ_BORINGSSL)
+                        {
+                            ASN1_INTEGER* asn1 = nullptr;
+                            uint64_t v;
+
+                            CF_CHECK_NE( (asn1 = BN_to_ASN1_INTEGER(bn, nullptr)), nullptr);
+                            const auto r = ASN1_INTEGER_get_uint64(&v, asn1);
+                            ASN1_INTEGER_free(asn1);
+                            CF_CHECK_EQ(r, 1);
+
+                            ret = v;
+                        }
+#endif
+                        break;
+                    default:
+                        break;
+
+                }
+            } catch ( ... ) { }
+
+            /* Silence compiler */
+            goto end;
+end:
+            return ret;
         }
 
         std::optional<int> AsInt(void) const {
@@ -178,6 +206,48 @@ end:
                                 if ( tmp != nullptr ) {
                                     BN_free(bn);
                                     bn = tmp;
+                                }
+                            }
+                        }
+                    }
+
+                    {
+                        if ( allowDup == true ) {
+                            const bool asn1Convert = ds.Get<bool>();
+
+                            if ( asn1Convert == true ) {
+                                ASN1_INTEGER* asn1 = BN_to_ASN1_INTEGER(bn, nullptr);
+
+                                if ( asn1 != nullptr ) {
+                                    BIGNUM* tmp = ASN1_INTEGER_to_BN(asn1, nullptr);
+
+                                    if ( tmp != nullptr ) {
+                                        BN_free(bn);
+                                        bn = tmp;
+                                    }
+
+                                    ASN1_INTEGER_free(asn1);
+                                }
+                            }
+                        }
+                    }
+
+                    {
+                        if ( allowDup == true ) {
+                            const bool asn1Convert = ds.Get<bool>();
+
+                            if ( asn1Convert == true ) {
+                                ASN1_ENUMERATED* asn1 = BN_to_ASN1_ENUMERATED(bn, nullptr);
+
+                                if ( asn1 != nullptr ) {
+                                    BIGNUM* tmp = ASN1_ENUMERATED_to_BN(asn1, nullptr);
+
+                                    if ( tmp != nullptr ) {
+                                        BN_free(bn);
+                                        bn = tmp;
+                                    }
+
+                                    ASN1_ENUMERATED_free(asn1);
                                 }
                             }
                         }
@@ -531,6 +601,11 @@ class ModLShift : public Operation {
 };
 
 class IsPow2 : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, BignumCluster& bn, BN_CTX& ctx) const override;
+};
+
+class Mask : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, BignumCluster& bn, BN_CTX& ctx) const override;
 };

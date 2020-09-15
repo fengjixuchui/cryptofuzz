@@ -3,11 +3,7 @@ all: module.a
 CXXFLAGS += -Wall -Wextra -Werror -std=c++17 -I ../../include -I ../../fuzzing-headers/include -DFUZZING_HEADERS_NO_IMPL
 
 module.a: module.o
-	rm -rf module.a
-	rm -rf tmp/
-	mkdir tmp/
-	cd tmp && ar x $(LIBFUZZER_JS_PATH)/quickjs/libquickjs.a
-	ar rcs module.a module.o $(LIBFUZZER_JS_PATH)/js.o tmp/*
+	ar rcs module.a module.o
 	ranlib module.a
 generate_ids : generate_ids.cpp
 	$(CXX) $(CXXFLAGS) generate_ids.cpp -o generate_ids
@@ -31,6 +27,8 @@ crypto-js.bytecode : header.js harness.js ids.js
 		$(CRYPTO_JS_PATH)/src/hmac.js \
 		$(CRYPTO_JS_PATH)/src/pbkdf2.js \
 		ids.js harness.js >combined.js
+	# Workaround for buffer overflow in QuickJS
+	/bin/echo -en "\x00" >>combined.js
 	$(LIBFUZZER_JS_PATH)/to_bytecode combined.js crypto-js.bytecode
 crypto-js.bytecode.h : crypto-js.bytecode
 	xxd -i crypto-js.bytecode >crypto-js.bytecode.h
@@ -39,3 +37,4 @@ module.o: module.cpp module.h crypto-js.bytecode.h
 	$(CXX) $(CXXFLAGS) -I $(LIBFUZZER_JS_PATH) -fPIC -c module.cpp -o module.o
 clean:
 	rm -rf *.o module.a
+	rm -rf *.o module.a generate_ids ids.js combined.js crypto-js.bytecode crypto-js.bytecode.h
