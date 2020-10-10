@@ -1,9 +1,12 @@
 #include "executor.h"
 #include "tests.h"
+#include "mutatorpool.h"
 #include <cryptofuzz/util.h>
 #include <fuzzing/memory.hpp>
 #include <algorithm>
 #include <set>
+
+uint32_t PRNG(void);
 
 extern "C" {
 //__attribute__((section("__libfuzzer_extra_counters")))
@@ -32,6 +35,15 @@ template<> void ExecutorBase<component::Digest, operation::Digest>::postprocess(
 }
 
 template<> std::optional<component::Digest> ExecutorBase<component::Digest, operation::Digest>::callModule(std::shared_ptr<Module> module, operation::Digest& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpDigest(op);
 }
 
@@ -51,6 +63,15 @@ template<> void ExecutorBase<component::MAC, operation::HMAC>::postprocess(std::
 }
 
 template<> std::optional<component::MAC> ExecutorBase<component::MAC, operation::HMAC>::callModule(std::shared_ptr<Module> module, operation::HMAC& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpHMAC(op);
 }
 
@@ -89,6 +110,10 @@ template<> void ExecutorBase<component::Ciphertext, operation::SymmetricEncrypt>
 }
 
 template<> void ExecutorBase<component::Ciphertext, operation::SymmetricEncrypt>::postprocess(std::shared_ptr<Module> module, operation::SymmetricEncrypt& op, const ExecutorBase<component::Ciphertext, operation::SymmetricEncrypt>::ResultPair& result) const {
+    if ( options.noDecrypt == true ) {
+        return;
+    }
+
     if ( result.second != std::nullopt ) {
         fuzzing::memory::memory_test_msan(result.second->ciphertext.GetPtr(), result.second->ciphertext.GetSize());
         if ( result.second->tag != std::nullopt ) {
@@ -262,6 +287,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_HKDF>::postprocess(s
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_HKDF>::callModule(std::shared_ptr<Module> module, operation::KDF_HKDF& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_HKDF(op);
 }
 
@@ -283,6 +317,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_PBKDF>::postprocess(
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_PBKDF>::callModule(std::shared_ptr<Module> module, operation::KDF_PBKDF& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_PBKDF(op);
 }
 
@@ -304,6 +347,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_PBKDF1>::postprocess
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_PBKDF1>::callModule(std::shared_ptr<Module> module, operation::KDF_PBKDF1& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_PBKDF1(op);
 }
 
@@ -325,6 +377,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_PBKDF2>::postprocess
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_PBKDF2>::callModule(std::shared_ptr<Module> module, operation::KDF_PBKDF2& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_PBKDF2(op);
 }
 
@@ -367,6 +428,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_SSH>::postprocess(st
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_SSH>::callModule(std::shared_ptr<Module> module, operation::KDF_SSH& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_SSH(op);
 }
 
@@ -388,6 +458,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_TLS1_PRF>::postproce
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_TLS1_PRF>::callModule(std::shared_ptr<Module> module, operation::KDF_TLS1_PRF& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_TLS1_PRF(op);
 }
 
@@ -409,6 +488,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_X963>::postprocess(s
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_X963>::callModule(std::shared_ptr<Module> module, operation::KDF_X963& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_X963(op);
 }
 
@@ -430,6 +518,15 @@ template<> void ExecutorBase<component::Key, operation::KDF_BCRYPT>::postprocess
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_BCRYPT>::callModule(std::shared_ptr<Module> module, operation::KDF_BCRYPT& op) const {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
     return module->OpKDF_BCRYPT(op);
 }
 
@@ -451,6 +548,17 @@ template<> void ExecutorBase<component::Key, operation::KDF_SP_800_108>::postpro
 }
 
 template<> std::optional<component::Key> ExecutorBase<component::Key, operation::KDF_SP_800_108>::callModule(std::shared_ptr<Module> module, operation::KDF_SP_800_108& op) const {
+    if ( op.mech.mode == true ) {
+        /* Only run whitelisted digests, if specified */
+        if ( options.digests != std::nullopt ) {
+            if ( std::find(
+                        options.digests->begin(),
+                        options.digests->end(),
+                        op.mech.type.Get()) == options.digests->end() ) {
+                return std::nullopt;
+            }
+        }
+    }
     return module->OpKDF_SP_800_108(op);
 }
 
@@ -558,8 +666,16 @@ template<> void ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyP
 
 template<> void ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>::postprocess(std::shared_ptr<Module> module, operation::ECC_GenerateKeyPair& op, const ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>::ResultPair& result) const {
     (void)module;
-    (void)op;
-    (void)result;
+
+    if ( result.second != std::nullopt && (PRNG() % 4) == 0 ) {
+        const auto curveID = op.curveType.Get();
+        const auto privkey = result.second->priv.ToTrimmedString();
+        const auto pub_x = result.second->pub.first.ToTrimmedString();
+        const auto pub_y = result.second->pub.second.ToTrimmedString();
+
+        Pool_CurvePrivkey.Set({ curveID, privkey });
+        Pool_CurveKeypair.Set({ curveID, privkey, pub_x, pub_y });
+    }
 }
 
 template<> std::optional<component::ECC_KeyPair> ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>::callModule(std::shared_ptr<Module> module, operation::ECC_GenerateKeyPair& op) const {
@@ -585,8 +701,14 @@ template<> void ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>:
 
 template<> void ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>::postprocess(std::shared_ptr<Module> module, operation::ECDSA_Sign& op, const ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>::ResultPair& result) const {
     (void)module;
-    (void)op;
-    (void)result;
+
+    if ( result.second != std::nullopt && (PRNG() % 4) == 0 ) {
+        const auto curveID = op.curveType.Get();
+        const auto sig_r = result.second->first.ToTrimmedString();
+        const auto sig_y = result.second->second.ToTrimmedString();
+
+        Pool_CurveECDSASignature.Set({ curveID, sig_r, sig_y });
+    }
 }
 
 template<> std::optional<component::ECDSA_Signature> ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>::callModule(std::shared_ptr<Module> module, operation::ECDSA_Sign& op) const {
@@ -686,7 +808,14 @@ template<> void ExecutorBase<component::Bignum, operation::BignumCalc>::updateEx
 template<> void ExecutorBase<component::Bignum, operation::BignumCalc>::postprocess(std::shared_ptr<Module> module, operation::BignumCalc& op, const ExecutorBase<component::Bignum, operation::BignumCalc>::ResultPair& result) const {
     (void)module;
     (void)op;
-    (void)result;
+
+    if ( result.second != std::nullopt && (PRNG() % 4) == 0 ) {
+        const auto bignum = result.second->ToTrimmedString();
+
+        if ( bignum.size() <= 1000 ) {
+            Pool_Bignum.Set(bignum);
+        }
+    }
 }
 
 template<> std::optional<component::Bignum> ExecutorBase<component::Bignum, operation::BignumCalc>::callModule(std::shared_ptr<Module> module, operation::BignumCalc& op) const {

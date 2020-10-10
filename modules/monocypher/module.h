@@ -7,16 +7,13 @@
 namespace cryptofuzz {
 namespace module {
 
-class crypto_js : public Module {
+class Monocypher : public Module {
     public:
-        void* js;
-        crypto_js(void);
-        ~crypto_js();
+        Monocypher(void);
         std::optional<component::Digest> OpDigest(operation::Digest& op) override;
-        std::optional<component::MAC> OpHMAC(operation::HMAC& op) override;
-        std::optional<component::Key> OpKDF_PBKDF2(operation::KDF_PBKDF2& op) override;
         std::optional<component::Ciphertext> OpSymmetricEncrypt(operation::SymmetricEncrypt& op) override;
         std::optional<component::Cleartext> OpSymmetricDecrypt(operation::SymmetricDecrypt& op) override;
+        std::optional<component::Key> OpKDF_ARGON2(operation::KDF_ARGON2& op) override;
 };
 
 } /* namespace module */

@@ -1,11 +1,18 @@
 #include "module.h"
 #include <cryptofuzz/util.h>
 #include <nettle/arcfour.h>
+#include <nettle/blowfish.h>
+#include <nettle/cast128.h>
 #include <nettle/ccm.h>
 #include <nettle/chacha-poly1305.h>
 #include <nettle/chacha.h>
 #include <nettle/cmac.h>
+#include <nettle/des.h>
 #include <nettle/eax.h>
+#if 0
+#include <nettle/ecc-curve.h>
+#include <nettle/ecc.h>
+#endif
 #include <nettle/gcm.h>
 #include <nettle/gosthash94.h>
 #include <nettle/hkdf.h>
@@ -16,9 +23,11 @@
 #include <nettle/pbkdf2.h>
 #include <nettle/ripemd160.h>
 #include <nettle/salsa20.h>
+#include <nettle/serpent.h>
 #include <nettle/sha.h>
 #include <nettle/sha3.h>
 #include <nettle/streebog.h>
+#include <nettle/twofish.h>
 #include <nettle/xts.h>
 
 namespace cryptofuzz {
@@ -735,6 +744,90 @@ std::optional<component::Ciphertext> Nettle::OpSymmetricEncrypt(operation::Symme
             ret = Nettle_detail::Salsa20Crypt(ds, op.cleartext, op.cipher, SALSA20_256_KEY_SIZE, false);
         }
         break;
+
+        case CF_CIPHER("DES_ECB"):
+        {
+            struct des_ctx ctx;
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % DES_BLOCK_SIZE, 0);
+            CF_CHECK_EQ(op.cipher.key.GetSize(), DES_KEY_SIZE);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            /* ignore return value */ des_set_key(&ctx, op.cipher.key.GetPtr());
+            /* noret */ des_encrypt(&ctx, op.cleartext.GetSize(), out, op.cleartext.GetPtr());
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("TWOFISH"):
+        {
+            struct twofish_ctx ctx;
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % TWOFISH_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), TWOFISH_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), TWOFISH_MAX_KEY_SIZE);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            /* ignore return value */ twofish_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ twofish_encrypt(&ctx, op.cleartext.GetSize(), out, op.cleartext.GetPtr());
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("SERPENT"):
+        {
+            struct serpent_ctx ctx;
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % SERPENT_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), SERPENT_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), SERPENT_MAX_KEY_SIZE);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            /* ignore return value */ serpent_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ serpent_encrypt(&ctx, op.cleartext.GetSize(), out, op.cleartext.GetPtr());
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("BLOWFISH_ECB"):
+        {
+            struct blowfish_ctx ctx;
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % BLOWFISH_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), BLOWFISH_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), BLOWFISH_MAX_KEY_SIZE);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            /* ignore return value */ blowfish_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ blowfish_encrypt(&ctx, op.cleartext.GetSize(), out, op.cleartext.GetPtr());
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("CAST5_ECB"):
+        {
+            struct cast128_ctx ctx;
+
+            CF_CHECK_EQ(op.cleartext.GetSize() % CAST128_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), CAST5_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), CAST5_MAX_KEY_SIZE);
+
+            out = util::malloc(op.cleartext.GetSize());
+
+            /* ignore return value */ cast5_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ cast128_encrypt(&ctx, op.cleartext.GetSize(), out, op.cleartext.GetPtr());
+
+            ret = component::Ciphertext(Buffer(out, op.cleartext.GetSize()));
+        }
+        break;
     }
 
 end:
@@ -1120,6 +1213,90 @@ std::optional<component::Cleartext> Nettle::OpSymmetricDecrypt(operation::Symmet
             ret = Nettle_detail::Salsa20Crypt(ds, op.ciphertext, op.cipher, SALSA20_256_KEY_SIZE, false);
         }
         break;
+
+        case CF_CIPHER("DES_ECB"):
+        {
+            struct des_ctx ctx;
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % DES_BLOCK_SIZE, 0);
+            CF_CHECK_EQ(op.cipher.key.GetSize(), DES_KEY_SIZE);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            /* ignore return value */ des_set_key(&ctx, op.cipher.key.GetPtr());
+            /* noret */ des_decrypt(&ctx, op.ciphertext.GetSize(), out, op.ciphertext.GetPtr());
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("TWOFISH"):
+        {
+            struct twofish_ctx ctx;
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % TWOFISH_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), TWOFISH_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), TWOFISH_MAX_KEY_SIZE);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            /* ignore return value */ twofish_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ twofish_decrypt(&ctx, op.ciphertext.GetSize(), out, op.ciphertext.GetPtr());
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("SERPENT"):
+        {
+            struct serpent_ctx ctx;
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % SERPENT_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), SERPENT_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), SERPENT_MAX_KEY_SIZE);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            /* ignore return value */ serpent_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ serpent_decrypt(&ctx, op.ciphertext.GetSize(), out, op.ciphertext.GetPtr());
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("BLOWFISH_ECB"):
+        {
+            struct blowfish_ctx ctx;
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % BLOWFISH_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), BLOWFISH_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), BLOWFISH_MAX_KEY_SIZE);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            /* ignore return value */ blowfish_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ blowfish_decrypt(&ctx, op.ciphertext.GetSize(), out, op.ciphertext.GetPtr());
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
+
+        case CF_CIPHER("CAST5_ECB"):
+        {
+            struct cast128_ctx ctx;
+
+            CF_CHECK_EQ(op.ciphertext.GetSize() % CAST128_BLOCK_SIZE, 0);
+            CF_CHECK_GTE(op.cipher.key.GetSize(), CAST5_MIN_KEY_SIZE);
+            CF_CHECK_LTE(op.cipher.key.GetSize(), CAST5_MAX_KEY_SIZE);
+
+            out = util::malloc(op.ciphertext.GetSize());
+
+            /* ignore return value */ cast5_set_key(&ctx, op.cipher.key.GetSize(), op.cipher.key.GetPtr());
+            /* noret */ cast128_decrypt(&ctx, op.ciphertext.GetSize(), out, op.ciphertext.GetPtr());
+
+            ret = component::Cleartext(Buffer(out, op.ciphertext.GetSize()));
+        }
+        break;
     }
 
 end:
@@ -1218,6 +1395,79 @@ std::optional<component::Key> Nettle::OpKDF_PBKDF2(operation::KDF_PBKDF2& op) {
 
 end:
     util::free(out);
+
+    return ret;
+}
+
+
+#if 0
+namespace Nettle_detail {
+    const struct ecc_curve* to_ecc_curve(const uint64_t curveID) {
+        switch ( curveID ) {
+            case    CF_ECC_CURVE("secp192r1"):
+                return nettle_get_secp_192r1();
+            case    CF_ECC_CURVE("secp224r1"):
+                return nettle_get_secp_224r1();
+            case    CF_ECC_CURVE("secp256r1"):
+                return nettle_get_secp_256r1();
+            case    CF_ECC_CURVE("secp384r1"):
+                return nettle_get_secp_384r1();
+            case    CF_ECC_CURVE("secp521r1"):
+                return nettle_get_secp_521r1();
+            default:
+                return nullptr;
+        }
+    }
+}
+#endif
+
+std::optional<component::ECC_PublicKey> Nettle::OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) {
+    std::optional<component::ECC_PublicKey> ret = std::nullopt;
+
+#if 1
+    /* Need to link against libhogweed.a in OSS-Fuzz before this can be enabled */
+    (void)op;
+#else
+    mpz_t priv_mpz, pub_x, pub_y;
+    struct ecc_scalar priv_scalar;
+    struct ecc_point pub;
+    char* pub_x_str = nullptr, *pub_y_str = nullptr;
+    const struct ecc_curve* curve = nullptr;
+    bool initialized = false;
+
+    CF_CHECK_NE(curve = Nettle_detail::to_ecc_curve(op.curveType.Get()), nullptr);
+
+    /* noret */ ecc_point_init(&pub, curve);
+    /* noret */ ecc_scalar_init(&priv_scalar, curve);
+    /* noret */ mpz_init(priv_mpz);
+    /* noret */ mpz_init(pub_x);
+    /* noret */ mpz_init(pub_y);
+
+    initialized = true;
+
+    /* XXX wrong result is ToString instead of ToTrimmedString is used */
+    CF_CHECK_EQ(mpz_init_set_str(priv_mpz, op.priv.ToTrimmedString().c_str(), 0), 0);
+    CF_CHECK_EQ(ecc_scalar_set(&priv_scalar, priv_mpz), 1);
+
+    /* noret */ ecc_point_mul_g(&pub, &priv_scalar);
+    /* noret */ ecc_point_get(&pub, pub_x, pub_y);
+
+    pub_x_str = mpz_get_str(nullptr, 10, pub_x);
+    pub_y_str = mpz_get_str(nullptr, 10, pub_y);
+
+    ret = { {pub_x_str, pub_y_str} };
+
+end:
+    if ( initialized == true ) {
+        /* noret */ ecc_point_clear(&pub);
+        /* noret */ ecc_scalar_clear(&priv_scalar);
+        /* noret */ mpz_clear(priv_mpz);
+        /* noret */ mpz_clear(pub_x);
+        /* noret */ mpz_clear(pub_y);
+        free(pub_x_str);
+        free(pub_y_str);
+    }
+#endif
 
     return ret;
 }

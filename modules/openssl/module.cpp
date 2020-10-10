@@ -1587,7 +1587,7 @@ std::optional<component::Ciphertext> OpenSSL::OpSymmetricEncrypt_EVP(operation::
 
         /* Convert cleartext to parts */
         partsCleartext = util::CipherInputTransform(ds, op.cipher.cipherType, out, out_size, op.cleartext.GetPtr(), op.cleartext.GetSize());
-        partsCleartext = { { op.cleartext.GetPtr(), op.cleartext.GetSize()} };
+        //partsCleartext = { { op.cleartext.GetPtr(), op.cleartext.GetSize()} };
 
         if ( op.aad != std::nullopt ) {
             if ( repository::IsCCM( op.cipher.cipherType.Get() ) ) {
@@ -1643,8 +1643,13 @@ std::optional<component::Ciphertext> OpenSSL::OpSymmetricEncrypt_EVP(operation::
         }
 
         for (const auto& part : partsCleartext) {
-            /* "the amount of data written may be anything from zero bytes to (inl + cipher_block_size - 1)" */
-            CF_CHECK_GTE(out_size, part.second + EVP_CIPHER_block_size(cipher) - 1);
+            if ( repository::IsWRAP(op.cipher.cipherType.Get()) ) {
+                /* WRAP ciphers don't honor the default rule */
+                CF_CHECK_GTE(out_size, part.second + EVP_CIPHER_block_size(cipher));
+            } else {
+                /* "the amount of data written may be anything from zero bytes to (inl + cipher_block_size - 1)" */
+                CF_CHECK_GTE(out_size, part.second + EVP_CIPHER_block_size(cipher) - 1);
+            }
 
             int len = -1;
             CF_CHECK_EQ(EVP_EncryptUpdate(ctx.GetPtr(), out + outIdx, &len, part.first, part.second), 1);
@@ -2001,6 +2006,11 @@ std::optional<component::Cleartext> OpenSSL::OpSymmetricDecrypt_EVP(operation::S
              */
             CF_CHECK_EQ(isAEAD(cipher, op.cipher.cipherType.Get()), true);
         }
+
+        if ( repository::IsWRAP(op.cipher.cipherType.Get()) ) {
+            /* noret */ EVP_CIPHER_CTX_set_flags(ctx.GetPtr(), EVP_CIPHER_CTX_FLAG_WRAP_ALLOW);
+        }
+
         CF_CHECK_EQ(EVP_DecryptInit_ex(ctx.GetPtr(), cipher, nullptr, nullptr, nullptr), 1);
 
         /* Must be a multiple of the block size of this cipher */
@@ -2841,13 +2851,14 @@ std::optional<component::Key> OpenSSL::OpKDF_SP_800_108(operation::KDF_SP_800_10
         }
 
         if ( op.mode == 1 ) {
-            /* XXX Salt is ignored in feedback mode */
+            /* XXX Salt is ignored in feedback mode
+             * https://github.com/openssl/openssl/issues/12409#issuecomment-701645838
+             */
             CF_CHECK_EQ(op.salt.GetSize(), 0);
         }
 
         CF_CHECK_EQ(op.mech.mode, true); /* Currently only HMAC supported, not CMAC */
 
-        CF_CHECK_NE(op.secret.GetSize(), 0); /* Crashes if secret is empty. https://github.com/openssl/openssl/issues/12409 */
         CF_CHECK_NE(md = toEVPMD(op.mech.type), nullptr);
 
         std::string mdName(EVP_MD_name(md));

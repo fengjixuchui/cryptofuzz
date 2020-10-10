@@ -45,6 +45,10 @@ class Type {
         inline bool operator==(const Type& rhs) const {
             return type == rhs.type;
         }
+
+        void Serialize(Datasource& ds) const {
+            ds.Put<>(type);
+        }
 };
 
 class Buffer {
@@ -52,7 +56,7 @@ class Buffer {
         std::vector<uint8_t> data;
     public:
         Buffer(Datasource& ds) :
-            data( ds.GetData(0, 0, 32000) )
+            data( ds.GetData(0, 0, (10*1024*1024)) )
         { }
 
         Buffer(nlohmann::json json) {
@@ -100,6 +104,10 @@ class Buffer {
             boost::algorithm::hex(data, std::back_inserter(asHex));
             j = asHex;
             return j;
+        }
+
+        void Serialize(Datasource& ds) const {
+            ds.PutData(data);
         }
 };
 
@@ -169,6 +177,10 @@ class Bignum {
 
         nlohmann::json ToJSON(void) const {
             return ToString();
+        }
+
+        void Serialize(Datasource& ds) const {
+            data.Serialize(ds);
         }
 };
 
