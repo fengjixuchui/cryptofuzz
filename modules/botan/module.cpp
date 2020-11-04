@@ -1,19 +1,20 @@
 #include "module.h"
 #include <cryptofuzz/util.h>
 #include <cryptofuzz/repository.h>
-#include <botan/hash.h>
-#include <botan/mac.h>
-#include <botan/cmac.h>
-#include <botan/cipher_mode.h>
-#include <botan/pbkdf.h>
-#include <botan/pwdhash.h>
-#include <botan/kdf.h>
-#include <botan/system_rng.h>
-#include <botan/bigint.h>
-#include <botan/ecdsa.h>
-#include <botan/pubkey.h>
 #include <botan/ber_dec.h>
+#include <botan/bigint.h>
+#include <botan/cipher_mode.h>
+#include <botan/cmac.h>
 #include <botan/curve25519.h>
+#include <botan/dh.h>
+#include <botan/ecdsa.h>
+#include <botan/hash.h>
+#include <botan/kdf.h>
+#include <botan/mac.h>
+#include <botan/pbkdf.h>
+#include <botan/pubkey.h>
+#include <botan/pwdhash.h>
+#include <botan/system_rng.h>
 #include "bn_ops.h"
 
 namespace cryptofuzz {
@@ -563,6 +564,65 @@ end:
     return ret;
 }
 
+std::optional<component::Key> Botan::OpKDF_TLS1_PRF(operation::KDF_TLS1_PRF& op) {
+    std::optional<component::Key> ret = std::nullopt;
+    std::unique_ptr<::Botan::KDF> tlsprf = nullptr;
+
+    try {
+        {
+            CF_CHECK_EQ(op.digestType.Get(), CF_DIGEST("MD5_SHA1"));
+            CF_CHECK_NE(tlsprf = ::Botan::KDF::create("TLS-PRF()"), nullptr);
+        }
+
+        {
+            const auto derived = tlsprf->derive_key(op.keySize, op.secret.Get(), op.seed.Get(), std::vector<uint8_t>{});
+
+            ret = component::Key(derived.data(), derived.size());
+        }
+    } catch ( ... ) { }
+
+end:
+    return ret;
+}
+
+std::optional<component::Key> Botan::OpKDF_BCRYPT(operation::KDF_BCRYPT& op) {
+    std::optional<component::Key> ret = std::nullopt;
+    std::unique_ptr<::Botan::PasswordHashFamily> pwdhash_fam = nullptr;
+    std::unique_ptr<::Botan::PasswordHash> pwdhash = nullptr;
+    uint8_t* out = util::malloc(op.keySize);
+
+    try {
+        /* Initialize */
+        {
+            CF_CHECK_EQ(op.digestType.Get(), CF_DIGEST("SHA512"));
+            CF_CHECK_NE(pwdhash_fam = ::Botan::PasswordHashFamily::create("Bcrypt-PBKDF"), nullptr);
+            CF_CHECK_NE(pwdhash = pwdhash_fam->from_params(op.iterations), nullptr);
+
+        }
+
+        /* Process */
+        {
+            pwdhash->derive_key(
+                    out,
+                    op.keySize,
+                    (const char*)op.secret.GetPtr(),
+                    op.secret.GetSize(),
+                    op.salt.GetPtr(),
+                    op.salt.GetSize());
+        }
+
+        /* Finalize */
+        {
+            ret = component::Key(out, op.keySize);
+        }
+    } catch ( ... ) { }
+
+end:
+    util::free(out);
+
+    return ret;
+}
+
 namespace Botan_detail {
     std::optional<std::string> CurveIDToString(const uint64_t curveID) {
 #include "curve_string_lut.h"
@@ -574,6 +634,28 @@ end:
         return ret;
     }
 } /* namespace Botan_detail */
+
+std::optional<component::ECC_KeyPair> Botan::OpECC_GenerateKeyPair(operation::ECC_GenerateKeyPair& op) {
+    std::optional<component::ECC_KeyPair> ret = std::nullopt;
+
+    std::optional<std::string> curveString;
+    static ::Botan::System_RNG rng;
+
+    CF_CHECK_NE(curveString = Botan_detail::CurveIDToString(op.curveType.Get()), std::nullopt);
+
+    {
+        ::Botan::EC_Group group(*curveString);
+        auto priv = ::Botan::ECDSA_PrivateKey(rng, group);
+
+        const auto pub_x = priv.public_point().get_affine_x();
+        const auto pub_y = priv.public_point().get_affine_y();
+
+        ret = { priv.private_value().to_dec_string(), { pub_x.to_dec_string(), pub_y.to_dec_string() } };
+    }
+
+end:
+    return ret;
+}
 
 std::optional<component::ECC_PublicKey> Botan::OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) {
     std::optional<component::ECC_PublicKey> ret = std::nullopt;
@@ -728,6 +810,38 @@ end:
     return ret;
 }
 
+std::optional<component::Bignum> Botan::OpDH_Derive(operation::DH_Derive& op) {
+    std::optional<component::Bignum> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+
+    static ::Botan::System_RNG rng;
+
+    try {
+        CF_CHECK_NE(op.priv.ToTrimmedString(), "0");
+
+        const ::Botan::BigInt g(op.base.ToString(ds));
+        const ::Botan::BigInt p(op.prime.ToString(ds));
+        const ::Botan::DL_Group grp(p, g);
+
+        const ::Botan::BigInt _priv(op.priv.ToString(ds));
+        std::unique_ptr<::Botan::Private_Key> priv(new ::Botan::DH_PrivateKey(rng, grp, _priv));
+
+        const ::Botan::BigInt _pub(op.pub.ToString(ds));
+        ::Botan::DH_PublicKey pub(grp, _pub);
+
+        std::unique_ptr<::Botan::PK_Key_Agreement> kas(new ::Botan::PK_Key_Agreement(*priv, rng, "Raw"));
+        const auto derived_key = kas->derive_key(0, pub.public_value());
+
+        const auto derived_str = ::Botan::BigInt(derived_key.bits_of()).to_dec_string();
+        if ( derived_str != "0" ) {
+            ret = derived_str;
+        }
+    } catch ( ... ) { }
+
+end:
+    return ret;
+}
+
 std::optional<component::Bignum> Botan::OpBignumCalc(operation::BignumCalc& op) {
     std::optional<component::Bignum> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
@@ -852,6 +966,21 @@ std::optional<component::Bignum> Botan::OpBignumCalc(operation::BignumCalc& op) 
             break;
         case    CF_CALCOP("NumLSZeroBits(A)"):
             opRunner = std::make_unique<Botan_bignum::NumLSZeroBits>();
+            break;
+        case    CF_CALCOP("Sqrt(A)"):
+            opRunner = std::make_unique<Botan_bignum::Sqrt>();
+            break;
+        case    CF_CALCOP("AddMod(A,B,C)"):
+            opRunner = std::make_unique<Botan_bignum::AddMod>();
+            break;
+        case    CF_CALCOP("SubMod(A,B,C)"):
+            opRunner = std::make_unique<Botan_bignum::SubMod>();
+            break;
+        case    CF_CALCOP("NumBits(A)"):
+            opRunner = std::make_unique<Botan_bignum::NumBits>();
+            break;
+        case    CF_CALCOP("Set(A)"):
+            opRunner = std::make_unique<Botan_bignum::Set>();
             break;
     }
 

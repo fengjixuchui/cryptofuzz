@@ -9,9 +9,11 @@
 #include <nettle/cmac.h>
 #include <nettle/des.h>
 #include <nettle/eax.h>
-#if 0
+#if defined(HAVE_LIBHOGWEED)
 #include <nettle/ecc-curve.h>
 #include <nettle/ecc.h>
+#include <nettle/ecdsa.h>
+#include <nettle/knuth-lfib.h>
 #endif
 #include <nettle/gcm.h>
 #include <nettle/gosthash94.h>
@@ -338,7 +340,7 @@ namespace Nettle_detail {
         return false;
     }
 
-    std::optional<Buffer> Salsa20Crypt(Datasource& ds, const Buffer& in, const component::SymmetricCipher& cipher, const size_t keySize, const bool rounds20) {
+    std::optional<Buffer> Salsa20Crypt(const Buffer& in, const component::SymmetricCipher& cipher, const size_t keySize, const bool rounds20) {
         std::optional<Buffer> ret = std::nullopt;
 
         if ( cipher.iv.GetSize() != SALSA20_NONCE_SIZE ) {
@@ -353,20 +355,7 @@ namespace Nettle_detail {
         struct salsa20_ctx ctx;
         size_t outIdx = 0;
 
-#if 0
-        auto parts = util::ToParts(ds, in);
-        if ( Salsa20_CheckParts(parts) == false ) {
-            CF_CHECK_GTE(in.GetSize(), SALSA20_BLOCK_SIZE);
-            parts = {
-                {in.GetPtr(), in.GetSize() - SALSA20_BLOCK_SIZE},
-                {in.GetPtr() + in.GetSize() - SALSA20_BLOCK_SIZE, SALSA20_BLOCK_SIZE}
-            };
-        }
-#else
-        /* Streaming Salsa20 is broken */
-        (void)ds;
-        util::Multipart parts = { {in.GetPtr(), in.GetSize()} };
-#endif
+        auto parts = util::ToEqualParts(in, SALSA20_BLOCK_SIZE);
 
         /* noret */ salsa20_set_key(&ctx, cipher.key.GetSize(), cipher.key.GetPtr());
         /* noret */ salsa20_set_iv(&ctx, cipher.iv.GetPtr());
@@ -723,25 +712,25 @@ std::optional<component::Ciphertext> Nettle::OpSymmetricEncrypt(operation::Symme
 
         case CF_CIPHER("SALSA20_128"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.cleartext, op.cipher, SALSA20_128_KEY_SIZE, true);
+            ret = Nettle_detail::Salsa20Crypt(op.cleartext, op.cipher, SALSA20_128_KEY_SIZE, true);
         }
         break;
 
         case CF_CIPHER("SALSA20_12_128"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.cleartext, op.cipher, SALSA20_128_KEY_SIZE, false);
+            ret = Nettle_detail::Salsa20Crypt(op.cleartext, op.cipher, SALSA20_128_KEY_SIZE, false);
         }
         break;
 
         case CF_CIPHER("SALSA20_256"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.cleartext, op.cipher, SALSA20_256_KEY_SIZE, true);
+            ret = Nettle_detail::Salsa20Crypt(op.cleartext, op.cipher, SALSA20_256_KEY_SIZE, true);
         }
         break;
 
         case CF_CIPHER("SALSA20_12_256"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.cleartext, op.cipher, SALSA20_256_KEY_SIZE, false);
+            ret = Nettle_detail::Salsa20Crypt(op.cleartext, op.cipher, SALSA20_256_KEY_SIZE, false);
         }
         break;
 
@@ -1192,25 +1181,25 @@ std::optional<component::Cleartext> Nettle::OpSymmetricDecrypt(operation::Symmet
 
         case CF_CIPHER("SALSA20_128"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.ciphertext, op.cipher, SALSA20_128_KEY_SIZE, true);
+            ret = Nettle_detail::Salsa20Crypt(op.ciphertext, op.cipher, SALSA20_128_KEY_SIZE, true);
         }
         break;
 
         case CF_CIPHER("SALSA20_12_128"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.ciphertext, op.cipher, SALSA20_128_KEY_SIZE, false);
+            ret = Nettle_detail::Salsa20Crypt(op.ciphertext, op.cipher, SALSA20_128_KEY_SIZE, false);
         }
         break;
 
         case CF_CIPHER("SALSA20_256"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.ciphertext, op.cipher, SALSA20_256_KEY_SIZE, true);
+            ret = Nettle_detail::Salsa20Crypt(op.ciphertext, op.cipher, SALSA20_256_KEY_SIZE, true);
         }
         break;
 
         case CF_CIPHER("SALSA20_12_256"):
         {
-            ret = Nettle_detail::Salsa20Crypt(ds, op.ciphertext, op.cipher, SALSA20_256_KEY_SIZE, false);
+            ret = Nettle_detail::Salsa20Crypt(op.ciphertext, op.cipher, SALSA20_256_KEY_SIZE, false);
         }
         break;
 
@@ -1306,67 +1295,70 @@ end:
     return ret;
 }
 
+namespace Nettle_detail {
+    template <class CTXType, size_t DigestSize>
+    std::optional<component::Key> HKDF(operation::KDF_HKDF& op, void* set_key, void* update, void* digest) {
+        typedef void (*set_key_t)(CTXType*, size_t, const uint8_t*);
+        std::optional<component::Key> ret = std::nullopt;
+
+        uint8_t* out = util::malloc(op.keySize);
+
+        CTXType ctx;
+        uint8_t prk[DigestSize];
+
+        CF_CHECK_LTE(op.keySize, 255 * DigestSize);
+
+        ((set_key_t)set_key)(&ctx, op.salt.GetSize(), op.salt.GetPtr());
+        hkdf_extract(&ctx,
+                (nettle_hash_update_func*)update,
+                (nettle_hash_digest_func*)digest,
+                DigestSize,
+                op.password.GetSize(), op.password.GetPtr(), prk);
+        ((set_key_t)set_key)(&ctx, DigestSize, prk);
+        hkdf_expand(&ctx,
+                (nettle_hash_update_func*)update,
+                (nettle_hash_digest_func*)digest,
+                DigestSize,
+                op.info.GetSize(),
+                op.info.GetPtr(),
+                op.keySize,
+                out);
+        ret = component::Key(out, op.keySize);
+end:
+        util::free(out);
+        return ret;
+    }
+}
+
 std::optional<component::Key> Nettle::OpKDF_HKDF(operation::KDF_HKDF& op) {
     std::optional<component::Key> ret = std::nullopt;
 
-    uint8_t* out = util::malloc(op.keySize);
-
     switch ( op.digestType.Get() ) {
+        case CF_DIGEST("MD5"):
+            ret = Nettle_detail::HKDF<hmac_md5_ctx, MD5_DIGEST_SIZE>(op, (void*)hmac_md5_set_key, (void*)hmac_md5_update, (void*)hmac_md5_digest);
+            break;
+        case CF_DIGEST("RIPEMD160"):
+            ret = Nettle_detail::HKDF<hmac_ripemd160_ctx, RIPEMD160_DIGEST_SIZE>(op, (void*)hmac_ripemd160_set_key, (void*)hmac_ripemd160_update, (void*)hmac_ripemd160_digest);
+            break;
         case CF_DIGEST("SHA1"):
-            {
-                struct hmac_sha1_ctx ctx;
-                uint8_t prk[SHA1_DIGEST_SIZE];
-
-                CF_CHECK_LTE(op.keySize, 255 * SHA1_DIGEST_SIZE);
-
-                hmac_sha1_set_key(&ctx, op.salt.GetSize(), op.salt.GetPtr());
-                hkdf_extract(&ctx,
-                        (nettle_hash_update_func*) hmac_sha1_update,
-                        (nettle_hash_digest_func*) hmac_sha1_digest,
-                        SHA1_DIGEST_SIZE,
-                        op.password.GetSize(), op.password.GetPtr(), prk);
-                hmac_sha1_set_key(&ctx, SHA1_DIGEST_SIZE, prk);
-                hkdf_expand(&ctx,
-                        (nettle_hash_update_func*) hmac_sha1_update,
-                        (nettle_hash_digest_func*) hmac_sha1_digest,
-                        SHA1_DIGEST_SIZE,
-                        op.info.GetSize(),
-                        op.info.GetPtr(),
-                        op.keySize,
-                        out);
-                ret = component::Key(out, op.keySize);
-            }
+            ret = Nettle_detail::HKDF<hmac_sha1_ctx, SHA1_DIGEST_SIZE>(op, (void*)hmac_sha1_set_key, (void*)hmac_sha1_update, (void*)hmac_sha1_digest);
+            break;
+        case CF_DIGEST("SHA224"):
+            ret = Nettle_detail::HKDF<hmac_sha224_ctx, SHA224_DIGEST_SIZE>(op, (void*)hmac_sha224_set_key, (void*)hmac_sha224_update, (void*)hmac_sha224_digest);
             break;
         case CF_DIGEST("SHA256"):
-            {
-                struct hmac_sha256_ctx ctx;
-                uint8_t prk[SHA256_DIGEST_SIZE];
-
-                CF_CHECK_LTE(op.keySize, 255 * SHA256_DIGEST_SIZE);
-
-                hmac_sha256_set_key(&ctx, op.salt.GetSize(), op.salt.GetPtr());
-                hkdf_extract(&ctx,
-                        (nettle_hash_update_func*) hmac_sha256_update,
-                        (nettle_hash_digest_func*) hmac_sha256_digest,
-                        SHA256_DIGEST_SIZE,
-                        op.password.GetSize(), op.password.GetPtr(), prk);
-                hmac_sha256_set_key(&ctx, SHA256_DIGEST_SIZE, prk);
-                hkdf_expand(&ctx,
-                        (nettle_hash_update_func*) hmac_sha256_update,
-                        (nettle_hash_digest_func*) hmac_sha256_digest,
-                        SHA256_DIGEST_SIZE,
-                        op.info.GetSize(),
-                        op.info.GetPtr(),
-                        op.keySize,
-                        out);
-                ret = component::Key(out, op.keySize);
-            }
+            ret = Nettle_detail::HKDF<hmac_sha256_ctx, SHA256_DIGEST_SIZE>(op, (void*)hmac_sha256_set_key, (void*)hmac_sha256_update, (void*)hmac_sha256_digest);
+            break;
+        case CF_DIGEST("SHA512"):
+            ret = Nettle_detail::HKDF<hmac_sha512_ctx, SHA512_DIGEST_SIZE>(op, (void*)hmac_sha512_set_key, (void*)hmac_sha512_update, (void*)hmac_sha512_digest);
+            break;
+        case CF_DIGEST("STREEBOG-256"):
+            ret = Nettle_detail::HKDF<hmac_streebog256_ctx, SHA256_DIGEST_SIZE>(op, (void*)hmac_streebog256_set_key, (void*)hmac_streebog256_update, (void*)hmac_streebog256_digest);
+            break;
+        case CF_DIGEST("STREEBOG-512"):
+            ret = Nettle_detail::HKDF<hmac_streebog512_ctx, SHA512_DIGEST_SIZE>(op, (void*)hmac_streebog512_set_key, (void*)hmac_streebog512_update, (void*)hmac_streebog512_digest);
             break;
     }
-
-end:
-
-    util::free(out);
 
     return ret;
 }
@@ -1399,8 +1391,7 @@ end:
     return ret;
 }
 
-
-#if 0
+#if defined(HAVE_LIBHOGWEED)
 namespace Nettle_detail {
     const struct ecc_curve* to_ecc_curve(const uint64_t curveID) {
         switch ( curveID ) {
@@ -1421,11 +1412,69 @@ namespace Nettle_detail {
 }
 #endif
 
+std::optional<component::ECC_KeyPair> Nettle::OpECC_GenerateKeyPair(operation::ECC_GenerateKeyPair& op) {
+    std::optional<component::ECC_KeyPair> ret = std::nullopt;
+#if !defined(HAVE_LIBHOGWEED)
+    (void)op;
+#else
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+
+    const struct ecc_curve* curve = nullptr;
+    mpz_t priv_mpz, pub_x, pub_y;
+    struct ecc_scalar priv_scalar;
+    struct ecc_point pub;
+    char* priv_str = nullptr, *pub_x_str = nullptr, *pub_y_str = nullptr;
+    struct knuth_lfib_ctx rctx;
+    bool initialized = false;
+    uint32_t seed = 0;
+
+    CF_CHECK_NE(curve = Nettle_detail::to_ecc_curve(op.curveType.Get()), nullptr);
+    try {
+        seed = ds.Get<uint32_t>();
+    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+    /* noret */ knuth_lfib_init(&rctx, seed);
+
+    /* noret */ ecc_point_init(&pub, curve);
+    /* noret */ ecc_scalar_init(&priv_scalar, curve);
+    /* noret */ mpz_init(priv_mpz);
+    /* noret */ mpz_init(pub_x);
+    /* noret */ mpz_init(pub_y);
+
+    initialized = true;
+
+    /* noret */ ecdsa_generate_keypair(&pub, &priv_scalar, &rctx, (nettle_random_func *) knuth_lfib_random);
+
+    /* noret */ ecc_scalar_get(&priv_scalar, priv_mpz);
+    priv_str = mpz_get_str(nullptr, 10, priv_mpz);
+
+    /* noret */ ecc_point_get(&pub, pub_x, pub_y);
+    pub_x_str = mpz_get_str(nullptr, 10, pub_x);
+    pub_y_str = mpz_get_str(nullptr, 10, pub_y);
+
+    ret = {
+        std::string(priv_str),
+        { std::string(pub_x_str), std::string(pub_y_str) }
+    };
+
+end:
+    if ( initialized == true ) {
+        /* noret */ ecc_point_clear(&pub);
+        /* noret */ ecc_scalar_clear(&priv_scalar);
+        /* noret */ mpz_clear(priv_mpz);
+        /* noret */ mpz_clear(pub_x);
+        /* noret */ mpz_clear(pub_y);
+        free(priv_str);
+        free(pub_x_str);
+        free(pub_y_str);
+    }
+#endif
+    return ret;
+}
+
 std::optional<component::ECC_PublicKey> Nettle::OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) {
     std::optional<component::ECC_PublicKey> ret = std::nullopt;
 
-#if 1
-    /* Need to link against libhogweed.a in OSS-Fuzz before this can be enabled */
+#if !defined(HAVE_LIBHOGWEED)
     (void)op;
 #else
     mpz_t priv_mpz, pub_x, pub_y;
