@@ -4,13 +4,26 @@
 #include <iostream>
 #include <stdlib.h>
 #include <cryptofuzz/repository.h>
+#include <cryptofuzz/wycheproof.h>
 
 namespace cryptofuzz {
 
-Options::Options(const int argc, char** argv) {
+std::string Options::calcOpToBase(const std::string calcOp) {
+    std::vector<std::string> calcOpParts;
+    boost::split(calcOpParts, calcOp, boost::is_any_of("("));
+    if ( calcOpParts.empty() ) {
+        printf("Cannot parse calcop\n");
+        abort();
+    }
+    return calcOpParts[0];
+}
+
+Options::Options(const int argc, char** argv, const std::vector<std::string> extraArguments) {
     for (int i = 0; i < argc; i++) {
         arguments.push_back( std::string(argv[i]) );
     }
+
+    arguments.insert(arguments.end(), extraArguments.begin(), extraArguments.end());
 
     for (size_t i = 1; i < arguments.size(); i++) {
         const auto arg = arguments[i];
@@ -183,6 +196,34 @@ Options::Options(const int argc, char** argv) {
             }
 
             this->disableModules = moduleIDs;
+        } else if ( !parts.empty() && parts[0] == "--calcops" ) {
+            if ( parts.size() != 2 ) {
+                std::cout << "Expected argument after --calcops=" << std::endl;
+                exit(1);
+            }
+
+            std::vector<std::string> calcOpStrings;
+            boost::split(calcOpStrings, parts[1], boost::is_any_of(","));
+
+            std::vector<uint64_t> calcOps;
+
+            for (const auto& curCalcOpStr : calcOpStrings) {
+                bool found = false;
+                for (size_t i = 0; i < (sizeof(repository::CalcOpLUT) / sizeof(repository::CalcOpLUT[0])); i++) {
+                    if ( boost::iequals(curCalcOpStr, calcOpToBase(repository::CalcOpLUT[i].name)) ) {
+                        calcOps.push_back(repository::CalcOpLUT[i].id);
+                        found = true;
+                        break;
+                    }
+                }
+
+                if ( found == false ) {
+                    std::cout << "Undefined calc op: " << curCalcOpStr << std::endl;
+                    exit(1);
+                }
+            }
+
+            this->calcOps = calcOps;
         } else if ( !parts.empty() && parts[0] == "--min-modules" ) {
             if ( parts.size() != 2 ) {
                 std::cout << "Expected argument after --min-modules=" << std::endl;
@@ -215,6 +256,38 @@ Options::Options(const int argc, char** argv) {
                 exit(1);
             }
             this->noCompare = true;
+        } else if ( !parts.empty() && parts[0] == "--dump-json" ) {
+            if ( parts.size() != 2 ) {
+                std::cout << "Expected argument after --dump-json=" << std::endl;
+                exit(1);
+            }
+
+            const auto jsonPath = parts[1];
+
+            FILE* fp = fopen(jsonPath.c_str(), "wb");
+            if ( fp == nullptr ) {
+                std::cout << "Cannot open file " << jsonPath << std::endl;
+                exit(1);
+            }
+            this->jsonDumpFP = fp;
+        } else if ( !parts.empty() && parts[0] == "--from-wycheproof" ) {
+            if ( parts.size() != 2 ) {
+                std::cout << "Expected argument after --from-wycheproof=" << std::endl;
+                exit(1);
+            }
+
+            std::vector<std::string> wycheproofArgs;
+            boost::split(wycheproofArgs, parts[1], boost::is_any_of(","));
+
+            if ( wycheproofArgs.size() != 2 ) {
+                std::cout << "Expected 2 arguments after --from-wycheproof=" << std::endl;
+                exit(1);
+            }
+
+            Wycheproof wp(wycheproofArgs[0], wycheproofArgs[1]);
+            wp.Run();
+
+            exit(0);
         }
     }
 }

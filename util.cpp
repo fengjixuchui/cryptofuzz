@@ -1,6 +1,7 @@
 #include <cryptofuzz/util.h>
 #include <cryptofuzz/util_hexdump.h>
 #include <cryptofuzz/repository.h>
+#include <cryptofuzz/crypto.h>
 #include <fuzzing/datasource/id.hpp>
 #include <iomanip>
 #include <map>
@@ -9,6 +10,7 @@
 #include <cstdlib>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
+#include <boost/algorithm/hex.hpp>
 #include "third_party/cpu_features/include/cpuinfo_x86.h"
 
 namespace cryptofuzz {
@@ -53,6 +55,10 @@ const uint8_t* ToInPlace(fuzzing::datasource::Datasource& ds, uint8_t* out, cons
     }
 
     return inPlace ? out : in;
+}
+
+Multipart ToParts(fuzzing::datasource::Datasource& ds, const std::vector<uint8_t>& buffer) {
+    return ToParts(ds, buffer.data(), buffer.size());
 }
 
 Multipart ToParts(fuzzing::datasource::Datasource& ds, const Buffer& buffer) {
@@ -243,8 +249,66 @@ std::string ToString(const component::ECC_KeyPair& val) {
     return ret;
 }
 
+std::string ToString(const component::ECDSA_Signature& val) {
+    std::string ret;
+
+    ret += "X: ";
+    ret += val.pub.first.ToString();
+    ret += "\n";
+
+    ret += "Y: ";
+    ret += val.pub.second.ToString();
+    ret += "\n";
+
+    ret += "R: ";
+    ret += val.signature.first.ToString();
+    ret += "\n";
+
+    ret += "S: ";
+    ret += val.signature.second.ToString();
+    ret += "\n";
+
+    return ret;
+}
+
 std::string ToString(const component::Bignum& val) {
     return val.ToString();
+}
+
+nlohmann::json ToJSON(const Buffer& buffer) {
+    return buffer.ToJSON();
+}
+
+nlohmann::json ToJSON(const bool val) {
+    return val;
+}
+
+nlohmann::json ToJSON(const component::Ciphertext& ciphertext) {
+    nlohmann::json ret;
+
+    ret["ciphertext"] = ciphertext.ciphertext.ToJSON();
+
+    if ( ciphertext.tag != std::nullopt ) {
+        ret["tag"] = ciphertext.tag->ToJSON();
+    }
+
+    return ret;
+}
+
+nlohmann::json ToJSON(const component::ECC_PublicKey& val) {
+    return val.ToJSON();
+}
+
+nlohmann::json ToJSON(const component::ECC_KeyPair& val) {
+    return val.ToJSON();
+}
+
+nlohmann::json ToJSON(const component::ECDSA_Signature& val) {
+    return val.ToJSON();
+}
+
+nlohmann::json ToJSON(const component::Bignum& val) {
+    return val.ToJSON();
 }
 
 class HaveBadPointer {
@@ -267,7 +331,14 @@ class HaveBadPointer {
 
 static HaveBadPointer haveBadPointer;
 
-uint8_t* GetNullPtr(void) {
+uint8_t* GetNullPtr(fuzzing::datasource::Datasource* ds) {
+    if ( ds != nullptr ) {
+        try {
+            return ds->Get<uint8_t*>();
+        } catch ( fuzzing::datasource::Datasource::OutOfData ) {
+            return (uint8_t*)0x12;
+        }
+    }
     return haveBadPointer.Get() == true ? (uint8_t*)0x12 : nullptr;
 }
 
@@ -369,6 +440,100 @@ std::string DecToHex(std::string s) {
     }
     ss << std::hex << i;
     return ss.str();
+}
+
+std::vector<uint8_t> HexToBin(const std::string s) {
+    std::vector<uint8_t> data;
+
+    boost::algorithm::unhex(s, std::back_inserter(data));
+
+    return data;
+}
+
+std::string BinToHex(const uint8_t* data, const size_t size) {
+    return BinToHex(std::vector<uint8_t>(data, data + size));
+}
+
+std::string BinToHex(const std::vector<uint8_t> data) {
+    std::string res;
+    boost::algorithm::hex_lower(data.begin(), data.end(), back_inserter(res));
+
+    return res;
+}
+
+std::string BinToDec(const std::vector<uint8_t> data) {
+    if ( data.empty() ) {
+        return "0";
+    }
+
+    boost::multiprecision::cpp_int i;
+    boost::multiprecision::import_bits(i, data.data(), data.data() + data.size());
+
+    std::stringstream ss;
+    ss << i;
+
+    if ( ss.str().empty() ) {
+        return "0";
+    } else {
+        return ss.str();
+    }
+}
+
+std::optional<std::pair<std::string, std::string>> SignatureFromDER(const std::string s) {
+    return SignatureFromDER(HexToBin(s));
+}
+
+std::optional<std::pair<std::string, std::string>> SignatureFromDER(const std::vector<uint8_t> data) {
+#define ADVANCE(n) { \
+    i += n; \
+    left -= n; \
+}
+
+#define GETBYTE() { \
+    CF_CHECK_LT(i, data.size()); \
+    b = data[i]; \
+    ADVANCE(1); \
+}
+    std::optional<std::pair<std::string, std::string>> ret = std::nullopt;
+    uint8_t b;
+    size_t i = 0, left = data.size();
+    std::string R, S;
+
+    GETBYTE(); CF_CHECK_EQ(b, 0x30);
+
+    GETBYTE(); CF_CHECK_EQ(b, left);
+
+    /* R */
+    {
+        GETBYTE(); CF_CHECK_EQ(b, 0x02);
+
+        GETBYTE(); CF_CHECK_LTE(b, left);
+        auto size = b;
+
+        R = BinToDec(std::vector<uint8_t>(&data[i], &data[i+size]));
+        ADVANCE(size);
+
+    }
+
+    /* S */
+    {
+        GETBYTE(); CF_CHECK_EQ(b, 0x02);
+
+        GETBYTE(); CF_CHECK_LTE(b, left);
+        auto size = b;
+
+        S = BinToDec(std::vector<uint8_t>(&data[i], &data[i+size]));
+        ADVANCE(size);
+    }
+
+    ret = {R, S};
+
+end:
+    return ret;
+}
+
+std::string SHA1(const std::vector<uint8_t> data) {
+    return BinToHex(crypto::sha1(data));
 }
 
 } /* namespace util */

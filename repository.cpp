@@ -112,6 +112,16 @@ std::string DigestToString(const uint64_t id) {
     }
 }
 
+std::optional<uint64_t> DigestFromString(const std::string& s) {
+    for (const auto& curve : DigestLUTMap) {
+        if ( s == curve.second.name ) {
+            return curve.first;
+        }
+    }
+
+    return std::nullopt;
+}
+
 std::string CipherToString(const uint64_t id) {
     try {
         return CipherLUTMap.at(id).name;
@@ -125,6 +135,24 @@ std::string ECC_CurveToString(const uint64_t id) {
         return ECC_CurveLUTMap.at(id).name;
     } catch ( std::out_of_range ) {
         return "(unknown)";
+    }
+}
+
+std::optional<uint64_t> ECC_CurveFromString(const std::string& s) {
+    for (const auto& curve : ECC_CurveLUTMap) {
+        if ( s == curve.second.name ) {
+            return curve.first;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::string> ECC_CurveToOrder(const uint64_t id) {
+    try {
+        return ECC_CurveLUTMap.at(id).order;
+    } catch ( std::out_of_range ) {
+        return std::nullopt;
     }
 }
 

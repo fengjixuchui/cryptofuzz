@@ -1,5 +1,6 @@
 #include <cryptofuzz/components.h>
 #include <cryptofuzz/operations.h>
+#include <cryptofuzz/util.h>
 #include <array>
 
 extern "C" {
@@ -19,7 +20,30 @@ class Bignum {
     private:
         mp_int* mp = nullptr;
         Datasource& ds;
-        const bool noFree = false;
+        bool noFree = false;
+
+        void baseConversion(void) const {
+#if !defined(WOLFSSL_SP_MATH)
+            uint8_t base = 2;
+            char* str = nullptr;
+
+            try { base = ds.Get<uint8_t>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+            {
+                int size;
+                CF_CHECK_EQ(mp_radix_size(mp, base, &size), MP_OKAY);
+                str = (char*)util::malloc(size);
+
+                CF_CHECK_EQ(mp_toradix(mp, str, base), MP_OKAY);
+
+                CF_ASSERT(mp_read_radix(mp, str, base) == MP_OKAY, "wolfCrypt cannot parse the output of mp_toradix");
+            }
+
+end:
+            util::free(str);
+#endif
+        }
+
     public:
 
         Bignum(Datasource& ds) :
@@ -70,6 +94,10 @@ class Bignum {
             }
         }
 
+        void SetNoFree(void) {
+            noFree = true;
+        }
+
         bool Set(const std::string s) {
             bool ret = false;
 
@@ -104,8 +132,31 @@ end:
             return ret;
         }
 
-
         mp_int* GetPtr(void) const {
+            {
+                /* Optionally clamp the bignum. This should not affect its value. */
+
+                bool clamp = false;
+
+                try { clamp = ds.Get<bool>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+                if ( clamp ) {
+                    /* noret */ mp_clamp(mp);
+                }
+            }
+
+            {
+                /* Optionally convert to a random base and back */
+
+                bool convert = false;
+
+                try { convert = ds.Get<bool>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+                if ( convert ) {
+                    baseConversion();
+                }
+            }
+
             return mp;
         }
 
@@ -153,7 +204,6 @@ end:
         std::optional<std::string> ToDecString(void) {
             std::optional<std::string> ret = std::nullopt;
             char* str = nullptr;
-
 
 #if defined(WOLFSSL_SP_MATH)
             str = (char*)util::malloc(8192);
@@ -225,6 +275,72 @@ end:
             CF_CHECK_EQ(bn.ToBin(v.data(), v.size()), true);
 
             ret = v;
+end:
+            return ret;
+        }
+
+        static bool ToBin(Datasource& ds, const component::Bignum b, uint8_t* dest, const size_t size) {
+            bool ret = false;
+            Bignum bn(ds);
+
+            CF_CHECK_EQ(bn.Set(b), true);
+            CF_CHECK_EQ(bn.ToBin(dest, size), true);
+
+            ret = true;
+end:
+            return ret;
+        }
+
+        static bool ToBin(Datasource& ds, const component::BignumPair b, uint8_t* dest, const size_t size) {
+            if ( (size % 2) != 0 ) {
+                abort();
+            }
+            bool ret = false;
+            const auto halfSize = size / 2;
+
+            CF_CHECK_EQ(ToBin(ds, b.first, dest, halfSize), true);
+            CF_CHECK_EQ(ToBin(ds, b.second, dest + halfSize, halfSize), true);
+
+            ret = true;
+end:
+            return ret;
+        }
+
+        static std::optional<component::Bignum> BinToBignum(Datasource& ds, const uint8_t* src, const size_t size) {
+            std::optional<component::Bignum> ret = std::nullopt;
+
+            wolfCrypt_bignum::Bignum bn(ds);
+            CF_CHECK_EQ(mp_read_unsigned_bin(bn.GetPtr(), src, size), MP_OKAY);
+
+            ret = bn.ToComponentBignum();
+
+end:
+            return ret;
+        }
+
+        static std::optional<component::BignumPair> BinToBignumPair(Datasource& ds, const uint8_t* src, const size_t size) {
+            if ( (size % 2) != 0 ) {
+                abort();
+            }
+            std::optional<component::BignumPair> ret = std::nullopt;
+            std::optional<component::Bignum> A, B;
+            const auto halfSize = size / 2;
+
+            {
+                wolfCrypt_bignum::Bignum bn(ds);
+                CF_CHECK_EQ(mp_read_unsigned_bin(bn.GetPtr(), src, halfSize), MP_OKAY);
+                CF_CHECK_NE(A = bn.ToComponentBignum(), std::nullopt);
+            }
+
+            {
+                wolfCrypt_bignum::Bignum bn(ds);
+                CF_CHECK_EQ(mp_read_unsigned_bin(bn.GetPtr(), src + halfSize, halfSize), MP_OKAY);
+                CF_CHECK_NE(B = bn.ToComponentBignum(), std::nullopt);
+            }
+
+
+            ret = {A->ToTrimmedString(), B->ToTrimmedString()};
+
 end:
             return ret;
         }
@@ -453,6 +569,21 @@ class Exp2 : public Operation {
 };
 
 class NumLSZeroBits : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, BignumCluster& bn) const override;
+};
+
+class MulAdd : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, BignumCluster& bn) const override;
+};
+
+class CondSet : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, BignumCluster& bn) const override;
+};
+
+class Rand : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, BignumCluster& bn) const override;
 };

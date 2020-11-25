@@ -918,11 +918,13 @@ end:
                         ret = CryptoPP_detail::CryptCFB< ::CryptoPP::LEA>(op);
                     }
                     break;
+#if 0
                 case    CF_CIPHER("SKIPJACK_CFB"):
                     {
                         ret = CryptoPP_detail::CryptCFB< ::CryptoPP::SKIPJACK>(op);
                     }
                     break;
+#endif
                 case    CF_CIPHER("RC6_CFB"):
                     {
                         ret = CryptoPP_detail::CryptCFB< ::CryptoPP::RC6>(op);
@@ -1081,11 +1083,13 @@ end:
                         ret = CryptoPP_detail::CryptCBC< ::CryptoPP::LEA>(op);
                     }
                     break;
+#if 0
                 case    CF_CIPHER("SKIPJACK_CBC"):
                     {
                         ret = CryptoPP_detail::CryptCBC< ::CryptoPP::SKIPJACK>(op);
                     }
                     break;
+#endif
                 case    CF_CIPHER("RC6_CBC"):
                     {
                         ret = CryptoPP_detail::CryptCBC< ::CryptoPP::RC6>(op);
@@ -1289,11 +1293,13 @@ end:
                         ret = CryptoPP_detail::CryptECB< ::CryptoPP::LEA>(op);
                     }
                     break;
+#if 0
                 case    CF_CIPHER("SKIPJACK_ECB"):
                     {
                         ret = CryptoPP_detail::CryptECB< ::CryptoPP::SKIPJACK>(op);
                     }
                     break;
+#endif
                 case    CF_CIPHER("RC6_ECB"):
                     {
                         ret = CryptoPP_detail::CryptECB< ::CryptoPP::RC6>(op);
@@ -1460,11 +1466,13 @@ end:
                         ret = CryptoPP_detail::CryptCTR< ::CryptoPP::LEA>(op);
                     }
                     break;
+#if 0
                 case    CF_CIPHER("SKIPJACK_CTR"):
                     {
                         ret = CryptoPP_detail::CryptCTR< ::CryptoPP::SKIPJACK>(op);
                     }
                     break;
+#endif
                 case    CF_CIPHER("RC6_CTR"):
                     {
                         ret = CryptoPP_detail::CryptCTR< ::CryptoPP::RC6>(op);
@@ -1673,11 +1681,13 @@ end:
                         ret = CryptoPP_detail::CryptOFB< ::CryptoPP::LEA>(op);
                     }
                     break;
+#if 0
                 case    CF_CIPHER("SKIPJACK_OFB"):
                     {
                         ret = CryptoPP_detail::CryptOFB< ::CryptoPP::SKIPJACK>(op);
                     }
                     break;
+#endif
                 case    CF_CIPHER("RC6_OFB"):
                     {
                         ret = CryptoPP_detail::CryptOFB< ::CryptoPP::RC6>(op);
@@ -2177,6 +2187,8 @@ end:
 
 std::optional<bool> CryptoPP::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     std::optional<bool> ret = std::nullopt;
+    (void)op;
+#if 0
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
 
     const ::CryptoPP::Integer pubXStr(op.pub.first.ToString(ds).c_str());
@@ -2212,6 +2224,7 @@ std::optional<bool> CryptoPP::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     }
 
 end:
+#endif
     return ret;
 }
 

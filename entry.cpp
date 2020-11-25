@@ -124,12 +124,43 @@
   #include <modules/monocypher/module.h>
 #endif
 
+#if defined(CRYPTOFUZZ_SECP256K1)
+  #include <modules/secp256k1/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_TREZOR_FIRMWARE)
+  #include <modules/trezor/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_ELLIPTIC)
+  #include <modules/elliptic/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_DECRED)
+  #include <modules/decred/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_BEARSSL)
+  #include <modules/bearssl/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_MICRO_ECC)
+  #include <modules/micro-ecc/module.h>
+#endif
+
 std::shared_ptr<cryptofuzz::Driver> driver = nullptr;
 
 const cryptofuzz::Options* cryptofuzz_options = nullptr;
 
 extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
-    const cryptofuzz::Options options(*argc, *argv);
+    std::vector<std::string> extraArguments;
+
+    const std::string cmdline(
+#include "extra_options.h"
+    );
+    boost::split(extraArguments, cmdline, boost::is_any_of(" "));
+
+    const cryptofuzz::Options options(*argc, *argv, extraArguments);
 
     driver = std::make_shared<cryptofuzz::Driver>(options);
     cryptofuzz_options = driver->GetOptionsPtr();
@@ -248,6 +279,30 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 #if defined(CRYPTOFUZZ_MONOCYPHER)
     driver->LoadModule( std::make_shared<cryptofuzz::module::Monocypher>() );
+#endif
+
+#if defined(CRYPTOFUZZ_SECP256K1)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::secp256k1>() );
+#endif
+
+#if defined(CRYPTOFUZZ_TREZOR_FIRMWARE)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::trezor_firmware>() );
+#endif
+
+#if defined(CRYPTOFUZZ_ELLIPTIC)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::elliptic>() );
+#endif
+
+#if defined(CRYPTOFUZZ_DECRED)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::Decred>() );
+#endif
+
+#if defined(CRYPTOFUZZ_BEARSSL)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::BearSSL>() );
+#endif
+
+#if defined(CRYPTOFUZZ_MICRO_ECC)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::micro_ecc>() );
 #endif
 
     /* TODO check if options.forceModule (if set) refers to a module that is

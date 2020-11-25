@@ -134,6 +134,7 @@ type OpECC_PrivateToPublic struct {
 type OpECDSA_Verify struct {
     Modifier ByteSlice
     CurveType Type
+    DigestType Type
     Pub_X string
     Pub_Y string
     Cleartext ByteSlice
@@ -495,7 +496,7 @@ func toCurve(curveType Type) (elliptic.Curve, error) {
     } else if issecp521r1(curveType) {
         return elliptic.P521(), nil
     } else {
-        return nil, fmt.Errorf("Unsupported digest ID")
+        return nil, fmt.Errorf("Unsupported curve ID")
     }
 
 }
@@ -534,11 +535,14 @@ func Golang_Cryptofuzz_OpECDSA_Verify(in []byte) {
     var op OpECDSA_Verify
     unmarshal(in, &op)
 
+    if isNULL(op.DigestType) == false {
+        return
+    }
+
     curve, err := toCurve(op.CurveType)
     if err != nil {
         return
     }
-
 
     sigR := decodeBignum(op.Sig_R)
     sigS := decodeBignum(op.Sig_S)
@@ -548,9 +552,14 @@ func Golang_Cryptofuzz_OpECDSA_Verify(in []byte) {
     pubKey.X = decodeBignum(op.Pub_X)
     pubKey.Y = decodeBignum(op.Pub_Y)
 
-    ecdsa.Verify(pubKey, op.Cleartext, sigR, sigS)
+    res := ecdsa.Verify(pubKey, op.Cleartext, sigR, sigS)
 
-    /* TODO set result */
+    r2, err := json.Marshal(&res)
+    if err != nil {
+        panic("Cannot marshal to JSON")
+    }
+
+    result = r2
 }
 
 func op_ADD(res *big.Int, BN0 *big.Int, BN1 *big.Int, BN2 *big.Int, direct bool) bool {
@@ -900,6 +909,11 @@ func op_XOR(res *big.Int, BN0 *big.Int, BN1 *big.Int, BN2 *big.Int, direct bool)
     return true
 }
 
+func op_NUM_BITS(res *big.Int, BN0 *big.Int, BN1 *big.Int, BN2 *big.Int, direct bool) bool {
+    res.SetInt64((int64)(BN0.BitLen()))
+    return true
+}
+
 //export Golang_Cryptofuzz_OpBignumCalc
 func Golang_Cryptofuzz_OpBignumCalc(in []byte) {
     resetResult()
@@ -969,6 +983,8 @@ func Golang_Cryptofuzz_OpBignumCalc(in []byte) {
         success = op_XOR(res, bn[0], bn[1], bn[2], direct)
     } else if isSetBit(op.CalcOp) {
         success = op_SET_BIT(res, bn[0], bn[1], bn[2], direct)
+    } else if isNumBits(op.CalcOp) {
+        success = op_NUM_BITS(res, bn[0], bn[1], bn[2], direct)
     }
 
     if success == false {

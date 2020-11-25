@@ -632,8 +632,16 @@ template<> void ExecutorBase<component::ECC_PublicKey, operation::ECC_PrivateToP
 
 template<> void ExecutorBase<component::ECC_PublicKey, operation::ECC_PrivateToPublic>::postprocess(std::shared_ptr<Module> module, operation::ECC_PrivateToPublic& op, const ExecutorBase<component::ECC_PublicKey, operation::ECC_PrivateToPublic>::ResultPair& result) const {
     (void)module;
-    (void)op;
-    (void)result;
+
+    if ( result.second != std::nullopt  ) {
+        const auto curveID = op.curveType.Get();
+        const auto privkey = op.priv.ToTrimmedString();
+        const auto pub_x = result.second->first.ToTrimmedString();
+        const auto pub_y = result.second->second.ToTrimmedString();
+
+        Pool_CurvePrivkey.Set({ curveID, privkey });
+        Pool_CurveKeypair.Set({ curveID, privkey, pub_x, pub_y });
+    }
 }
 
 template<> std::optional<component::ECC_PublicKey> ExecutorBase<component::ECC_PublicKey, operation::ECC_PrivateToPublic>::callModule(std::shared_ptr<Module> module, operation::ECC_PrivateToPublic& op) const {
@@ -677,7 +685,7 @@ template<> void ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyP
 template<> void ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>::postprocess(std::shared_ptr<Module> module, operation::ECC_GenerateKeyPair& op, const ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>::ResultPair& result) const {
     (void)module;
 
-    if ( result.second != std::nullopt && (PRNG() % 4) == 0 ) {
+    if ( result.second != std::nullopt  ) {
         const auto curveID = op.curveType.Get();
         const auto privkey = result.second->priv.ToTrimmedString();
         const auto pub_x = result.second->pub.first.ToTrimmedString();
@@ -712,12 +720,14 @@ template<> void ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>:
 template<> void ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>::postprocess(std::shared_ptr<Module> module, operation::ECDSA_Sign& op, const ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>::ResultPair& result) const {
     (void)module;
 
-    if ( result.second != std::nullopt && (PRNG() % 4) == 0 ) {
+    if ( result.second != std::nullopt  ) {
         const auto curveID = op.curveType.Get();
-        const auto sig_r = result.second->first.ToTrimmedString();
-        const auto sig_y = result.second->second.ToTrimmedString();
+        const auto pub_x = result.second->pub.first.ToTrimmedString();
+        const auto pub_y = result.second->pub.second.ToTrimmedString();
+        const auto sig_r = result.second->signature.first.ToTrimmedString();
+        const auto sig_y = result.second->signature.second.ToTrimmedString();
 
-        Pool_CurveECDSASignature.Set({ curveID, sig_r, sig_y });
+        Pool_CurveECDSASignature.Set({ curveID, pub_x, pub_y, sig_r, sig_y });
     }
 }
 
@@ -731,6 +741,17 @@ template<> std::optional<component::ECDSA_Signature> ExecutorBase<component::ECD
             return std::nullopt;
         }
     }
+
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt && op.digestType.Get() != 0 ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
+            return std::nullopt;
+        }
+    }
+
     const size_t size = op.priv.ToTrimmedString().size();
 
     if ( size == 0 || size > 4096 ) {
@@ -764,18 +785,26 @@ template<> std::optional<bool> ExecutorBase<bool, operation::ECDSA_Verify>::call
             return std::nullopt;
         }
     }
-    const std::vector<size_t> sizes = {
-        op.pub.first.ToTrimmedString().size(),
-        op.pub.second.ToTrimmedString().size(),
-        op.signature.first.ToTrimmedString().size(),
-        op.signature.second.ToTrimmedString().size(),
-    };
 
-    for (const auto& size : sizes) {
-        if ( size == 0 || size > 4096 ) {
+    /* Only run whitelisted digests, if specified */
+    if ( options.digests != std::nullopt && op.digestType.Get() != 0 ) {
+        if ( std::find(
+                    options.digests->begin(),
+                    options.digests->end(),
+                    op.digestType.Get()) == options.digests->end() ) {
             return std::nullopt;
         }
     }
+
+    /* Intentionally do not constrain the size of the public key or
+     * signature (like we do for BignumCalc).
+     *
+     * If any large public key or signature causes a time-out (or
+     * worse), this is something that needs attention;
+     * because verifiers sometimes process untrusted public keys,
+     * signatures or both, they should be resistant to bugs
+     * arising from large inputs.
+     */
 
     return module->OpECDSA_Verify(op);
 }
@@ -805,6 +834,33 @@ template<> std::optional<component::Secret> ExecutorBase<component::Secret, oper
         }
     }
     return module->OpECDH_Derive(op);
+}
+
+/* Specialization for operation::ECIES_Encrypt */
+template<> void ExecutorBase<component::Ciphertext, operation::ECIES_Encrypt>::updateExtraCounters(const uint64_t moduleID, operation::ECIES_Encrypt& op) const {
+    (void)moduleID;
+    (void)op;
+
+    /* TODO */
+}
+
+template<> void ExecutorBase<component::Ciphertext, operation::ECIES_Encrypt>::postprocess(std::shared_ptr<Module> module, operation::ECIES_Encrypt& op, const ExecutorBase<component::Ciphertext, operation::ECIES_Encrypt>::ResultPair& result) const {
+    (void)module;
+    (void)op;
+    (void)result;
+}
+
+template<> std::optional<component::Ciphertext> ExecutorBase<component::Ciphertext, operation::ECIES_Encrypt>::callModule(std::shared_ptr<Module> module, operation::ECIES_Encrypt& op) const {
+    /* Only run whitelisted curves, if specified */
+    if ( options.curves != std::nullopt ) {
+        if ( std::find(
+                    options.curves->begin(),
+                    options.curves->end(),
+                    op.curveType.Get()) == options.curves->end() ) {
+            return std::nullopt;
+        }
+    }
+    return module->OpECIES_Encrypt(op);
 }
 
 /* Specialization for operation::DH_Derive */
@@ -871,7 +927,7 @@ template<> void ExecutorBase<component::Bignum, operation::BignumCalc>::postproc
     (void)module;
     (void)op;
 
-    if ( result.second != std::nullopt && (PRNG() % 4) == 0 ) {
+    if ( result.second != std::nullopt  ) {
         const auto bignum = result.second->ToTrimmedString();
 
         if ( bignum.size() <= 1000 ) {
@@ -881,6 +937,16 @@ template<> void ExecutorBase<component::Bignum, operation::BignumCalc>::postproc
 }
 
 template<> std::optional<component::Bignum> ExecutorBase<component::Bignum, operation::BignumCalc>::callModule(std::shared_ptr<Module> module, operation::BignumCalc& op) const {
+    /* Only run whitelisted calcops, if specified */
+    if ( options.calcOps != std::nullopt ) {
+        if ( std::find(
+                    options.calcOps->begin(),
+                    options.calcOps->end(),
+                    op.calcOp.Get()) == options.calcOps->end() ) {
+            return std::nullopt;
+        }
+    }
+
     /* Prevent timeouts */
     if ( op.bn0.GetSize() > 1000 ) return std::nullopt;
     if ( op.bn1.GetSize() > 1000 ) return std::nullopt;
@@ -954,6 +1020,27 @@ void ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>::compa
 template <class ResultType, class OperationType>
 bool ExecutorBase<ResultType, OperationType>::dontCompare(const OperationType& operation) const {
     (void)operation;
+
+    return false;
+}
+
+template <>
+bool ExecutorBase<component::Bignum, operation::BignumCalc>::dontCompare(const operation::BignumCalc& operation) const {
+    if ( operation.calcOp.Get() == CF_CALCOP("Rand()") ) { return true; }
+
+    return false;
+}
+
+template <>
+bool ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>::dontCompare(const operation::ECDSA_Sign& operation) const {
+    if (
+            operation.curveType.Get() != CF_ECC_CURVE("ed25519") &&
+            operation.curveType.Get() != CF_ECC_CURVE("ed448") ) {
+        if ( operation.UseRandomNonce() ) {
+            /* Don't compare ECDSA signatures comptued from a randomly generated nonce */
+            return true;
+        }
+    }
 
     return false;
 }
@@ -1231,6 +1318,13 @@ void ExecutorBase<ResultType, OperationType>::Run(Datasource& parentDs, const ui
 
         if ( result.second != std::nullopt ) {
             updateExtraCounters(module->ID, op);
+
+            if ( options.jsonDumpFP != std::nullopt ) {
+                nlohmann::json j;
+                j["operation"] = op.ToJSON();
+                j["result"] = util::ToJSON(*result.second);
+                fprintf(*options.jsonDumpFP, "%s\n", j.dump().c_str());
+            }
         }
 
         if ( options.debug == true ) {
@@ -1277,6 +1371,7 @@ template class ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPa
 template class ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>;
 template class ExecutorBase<bool, operation::ECDSA_Verify>;
 template class ExecutorBase<component::Secret, operation::ECDH_Derive>;
+template class ExecutorBase<component::Ciphertext, operation::ECIES_Encrypt>;
 template class ExecutorBase<component::DH_KeyPair, operation::DH_GenerateKeyPair>;
 template class ExecutorBase<component::Bignum, operation::DH_Derive>;
 template class ExecutorBase<component::Bignum, operation::BignumCalc>;

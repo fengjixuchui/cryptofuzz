@@ -270,9 +270,17 @@ end:
             std::optional<component::Bignum> ret = std::nullopt;
 
             char* str = nullptr;
-            CF_CHECK_NE(str = BN_bn2dec(GetPtr()), nullptr);
 
-            ret = { std::string(str) };
+            bool hex = true;
+            try { hex = ds.Get<bool>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+            if ( hex == true ) {
+                CF_CHECK_NE(str = BN_bn2hex(GetPtr()), nullptr);
+                ret = { util::HexToDec(str) };
+            } else {
+                CF_CHECK_NE(str = BN_bn2dec(GetPtr()), nullptr);
+                ret = { std::string(str) };
+            }
 end:
             OPENSSL_free(str);
 
@@ -611,6 +619,11 @@ class Mask : public Operation {
 };
 
 class IsCoprime : public Operation {
+    public:
+        bool Run(Datasource& ds, Bignum& res, BignumCluster& bn, BN_CTX& ctx) const override;
+};
+
+class Rand : public Operation {
     public:
         bool Run(Datasource& ds, Bignum& res, BignumCluster& bn, BN_CTX& ctx) const override;
 };

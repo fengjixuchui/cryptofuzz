@@ -4,8 +4,15 @@
 
 #include "bn_ops.h"
 
+#define GET_OPTIONAL_BN() (ds.Get<bool>() ? bn.GetDestPtr(3) : nullptr)
+
 namespace cryptofuzz {
 namespace module {
+
+namespace wolfCrypt_detail {
+    WC_RNG* GetRNG(void);
+}
+
 namespace wolfCrypt_bignum {
 
 namespace wolfCrypt_bignum_detail {
@@ -92,7 +99,7 @@ bool Mul::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
                 ret = true;
             }
             break;
-#if !defined(USE_FAST_MATH)
+#if !defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH)
         case    2:
             CF_CHECK_EQ(mp_cmp_d(bn[1].GetPtr(), 2), MP_EQ);
             CF_CHECK_EQ(mp_mul_2(bn[0].GetPtr(), res.GetPtr()), MP_OKAY);
@@ -116,7 +123,7 @@ bool Div::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
     switch ( ds.Get<uint8_t>() ) {
         case    0:
-            CF_CHECK_EQ(mp_div(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr(), nullptr), MP_OKAY);
+            CF_CHECK_EQ(mp_div(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr(), GET_OPTIONAL_BN()), MP_OKAY);
             break;
         case    1:
             CF_CHECK_EQ(mp_cmp_d(bn[1].GetPtr(), 2), MP_EQ);
@@ -329,7 +336,7 @@ bool RShift::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
             break;
 #if !defined(WOLFSSL_SP_MATH)
         case    1:
-            CF_CHECK_EQ(mp_div_2d(bn[0].GetPtr(), numBits, res.GetPtr(), nullptr), MP_OKAY);
+            CF_CHECK_EQ(mp_div_2d(bn[0].GetPtr(), numBits, res.GetPtr(), GET_OPTIONAL_BN()), MP_OKAY);
             ret = true;
             break;
 #endif
@@ -823,6 +830,71 @@ bool NumLSZeroBits::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 end:
 #endif
 
+    return ret;
+}
+
+bool MulAdd::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
+    bool ret = false;
+
+    std::optional<std::string> mulRes, toAdd;
+
+    auto mul = std::make_unique<Mul>();
+    auto add = std::make_unique<Add>();
+
+    CF_CHECK_NE(toAdd = bn[2].ToDecString(), std::nullopt);
+
+    CF_CHECK_EQ(mul->Run(ds, res, bn), true);
+
+    CF_CHECK_NE(mulRes = res.ToDecString(), std::nullopt);
+    CF_CHECK_EQ(bn.Set(0, *mulRes), true);
+
+    CF_CHECK_EQ(bn.Set(1, *toAdd), true);
+    CF_CHECK_EQ(add->Run(ds, res, bn), true);
+
+    ret = true;
+
+end:
+    return ret;
+}
+
+bool CondSet::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
+    (void)ds;
+
+    bool ret = false;
+
+    const int doCopy = mp_iszero(bn[1].GetPtr()) ? 0 : 1;
+    CF_CHECK_EQ(mp_cond_copy(bn[0].GetPtr(), doCopy, res.GetPtr()), MP_OKAY);
+
+    ret = true;
+
+end:
+    return ret;
+}
+
+bool Rand::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
+    (void)ds;
+    (void)bn;
+
+    bool ret = false;
+
+    switch ( ds.Get<uint8_t>() ) {
+        case    0:
+            {
+                const auto len = ds.Get<uint16_t>() % 512;
+                CF_CHECK_EQ(mp_rand(res.GetPtr(), len, wolfCrypt_detail::GetRNG()), MP_OKAY);
+                ret = true;
+            }
+            break;
+        case    1:
+            {
+                const auto len = ds.Get<uint16_t>() % 512;
+                CF_CHECK_EQ(mp_rand_prime(res.GetPtr(), len, wolfCrypt_detail::GetRNG(), nullptr), MP_OKAY);
+                ret = true;
+            }
+            break;
+    }
+
+end:
     return ret;
 }
 
