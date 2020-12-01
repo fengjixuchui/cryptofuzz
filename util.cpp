@@ -424,7 +424,7 @@ std::string HexToDec(std::string s) {
     }
 }
 
-std::string DecToHex(std::string s) {
+std::string DecToHex(std::string s, const std::optional<size_t> padTo) {
     s.erase(0, s.find_first_not_of('0'));
     boost::multiprecision::cpp_int i(s);
     bool negative;
@@ -439,7 +439,14 @@ std::string DecToHex(std::string s) {
         ss << "-";
     }
     ss << std::hex << i;
-    return ss.str();
+    auto ret = ss.str();
+    if ( ret.size() % 2 != 0 ) {
+        ret = "0" + ret;
+    }
+    if ( padTo != std::nullopt && ret.size() < *padTo ) {
+        ret = std::string(*padTo - ret.size(), '0') + ret;
+    }
+    return ret;
 }
 
 std::vector<uint8_t> HexToBin(const std::string s) {
@@ -448,6 +455,28 @@ std::vector<uint8_t> HexToBin(const std::string s) {
     boost::algorithm::unhex(s, std::back_inserter(data));
 
     return data;
+}
+
+std::optional<std::vector<uint8_t>> DecToBin(const std::string s, std::optional<size_t> size) {
+    std::vector<uint8_t> v;
+    boost::multiprecision::cpp_int c(s);
+    boost::multiprecision::export_bits(c, std::back_inserter(v), 8);
+    if ( size == std::nullopt ) {
+        return v;
+    }
+
+    if ( v.size() > *size ) {
+        return std::nullopt;
+    }
+    const auto diff = *size - v.size();
+
+    std::vector<uint8_t> ret(*size);
+    if ( diff > 0 ) {
+        memset(ret.data(), 0, diff);
+    }
+    memcpy(ret.data() + diff, v.data(), v.size());
+
+    return ret;
 }
 
 std::string BinToHex(const uint8_t* data, const size_t size) {
@@ -459,6 +488,10 @@ std::string BinToHex(const std::vector<uint8_t> data) {
     boost::algorithm::hex_lower(data.begin(), data.end(), back_inserter(res));
 
     return res;
+}
+
+std::string BinToDec(const uint8_t* data, const size_t size) {
+    return BinToDec(std::vector<uint8_t>(data, data + size));
 }
 
 std::string BinToDec(const std::vector<uint8_t> data) {
@@ -477,6 +510,50 @@ std::string BinToDec(const std::vector<uint8_t> data) {
     } else {
         return ss.str();
     }
+}
+
+std::optional<std::vector<uint8_t>> ToDER(const std::string A, const std::string B) {
+    std::vector<uint8_t> ret;
+
+    const auto ABin = DecToBin(A);
+    if ( ABin == std::nullopt ) {
+        return std::nullopt;
+    }
+    const auto BBin = DecToBin(B);
+    if ( BBin == std::nullopt ) {
+        return std::nullopt;
+    }
+
+    size_t ABinSize = ABin->size();
+    size_t BBinSize = BBin->size();
+    if ( ABinSize + BBinSize + 2 + 2 > 255 ) {
+        return std::nullopt;
+    }
+
+    const bool AHigh = ABinSize > 0 && ((*ABin)[0] & 0x80) == 0x80;
+    const bool BHigh = BBinSize > 0 && ((*BBin)[0] & 0x80) == 0x80;
+
+    ABinSize += AHigh ? 1 : 0;
+    BBinSize += BHigh ? 1 : 0;
+
+    ret.push_back(0x30);
+    ret.push_back(2 + ABinSize + 2 + BBinSize);
+
+    ret.push_back(0x02);
+    ret.push_back(ABinSize);
+    if ( AHigh == true ) {
+        ret.push_back(0x00);
+    }
+    ret.insert(std::end(ret), std::begin(*ABin), std::end(*ABin));
+
+    ret.push_back(0x02);
+    ret.push_back(BBinSize);
+    if ( BHigh == true ) {
+        ret.push_back(0x00);
+    }
+    ret.insert(std::end(ret), std::begin(*BBin), std::end(*BBin));
+
+    return ret;
 }
 
 std::optional<std::pair<std::string, std::string>> SignatureFromDER(const std::string s) {
