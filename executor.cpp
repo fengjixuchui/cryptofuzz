@@ -667,6 +667,34 @@ template<> std::optional<component::ECC_PublicKey> ExecutorBase<component::ECC_P
     return module->OpECC_PrivateToPublic(op);
 }
 
+/* Specialization for operation::ECC_ValidatePubkey */
+template<> void ExecutorBase<bool, operation::ECC_ValidatePubkey>::updateExtraCounters(const uint64_t moduleID, operation::ECC_ValidatePubkey& op) const {
+    (void)moduleID;
+    (void)op;
+
+    /* TODO */
+}
+
+template<> void ExecutorBase<bool, operation::ECC_ValidatePubkey>::postprocess(std::shared_ptr<Module> module, operation::ECC_ValidatePubkey& op, const ExecutorBase<bool, operation::ECC_ValidatePubkey>::ResultPair& result) const {
+    (void)module;
+    (void)op;
+    (void)result;
+}
+
+template<> std::optional<bool> ExecutorBase<bool, operation::ECC_ValidatePubkey>::callModule(std::shared_ptr<Module> module, operation::ECC_ValidatePubkey& op) const {
+    /* Only run whitelisted curves, if specified */
+    if ( options.curves != std::nullopt ) {
+        if ( std::find(
+                    options.curves->begin(),
+                    options.curves->end(),
+                    op.curveType.Get()) == options.curves->end() ) {
+            return std::nullopt;
+        }
+    }
+
+    return module->OpECC_ValidatePubkey(op);
+}
+
 /* Specialization for operation::ECC_GenerateKeyPair */
 
 /* Do not compare DH_GenerateKeyPair results, because the result can be produced indeterministically */
@@ -725,12 +753,13 @@ template<> void ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>:
 
     if ( result.second != std::nullopt  ) {
         const auto curveID = op.curveType.Get();
+        const auto cleartext = op.cleartext.ToHex();
         const auto pub_x = result.second->pub.first.ToTrimmedString();
         const auto pub_y = result.second->pub.second.ToTrimmedString();
         const auto sig_r = result.second->signature.first.ToTrimmedString();
         const auto sig_s = result.second->signature.second.ToTrimmedString();
 
-        Pool_CurveECDSASignature.Set({ curveID, pub_x, pub_y, sig_r, sig_s});
+        Pool_CurveECDSASignature.Set({ curveID, cleartext, pub_x, pub_y, sig_r, sig_s});
 
         if ( pub_x.size() <= 1000 ) { Pool_Bignum.Set(pub_x); }
         if ( pub_y.size() <= 1000 ) { Pool_Bignum.Set(pub_y); }
@@ -1375,6 +1404,7 @@ template class ExecutorBase<component::Key, operation::KDF_SP_800_108>;
 template class ExecutorBase<component::Signature, operation::Sign>;
 template class ExecutorBase<bool, operation::Verify>;
 template class ExecutorBase<component::ECC_PublicKey, operation::ECC_PrivateToPublic>;
+template class ExecutorBase<bool, operation::ECC_ValidatePubkey>;
 template class ExecutorBase<component::ECC_KeyPair, operation::ECC_GenerateKeyPair>;
 template class ExecutorBase<component::ECDSA_Signature, operation::ECDSA_Sign>;
 template class ExecutorBase<bool, operation::ECDSA_Verify>;

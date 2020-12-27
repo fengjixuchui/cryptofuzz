@@ -119,9 +119,15 @@ std::optional<component::MAC> Botan::OpHMAC(operation::HMAC& op) {
             std::optional<std::string> algoString;
             CF_CHECK_NE(algoString = Botan_detail::DigestIDToString(op.digestType.Get(), true, true), std::nullopt);
 
-            const bool isSipHash = op.digestType.Get() == CF_DIGEST("SIPHASH64");
+            std::string hmacString;
+            if (
+                    op.digestType.Is(CF_DIGEST("SIPHASH64")) ||
+                    op.digestType.Is(CF_DIGEST("BLAKE2B_MAC")) ) {
+                hmacString = *algoString;
+            } else {
+                hmacString = Botan_detail::parenthesize("HMAC", *algoString);
+            }
 
-            const std::string hmacString = isSipHash ? *algoString : Botan_detail::parenthesize("HMAC", *algoString);
             CF_CHECK_NE(hmac = ::Botan::MessageAuthenticationCode::create(hmacString), nullptr);
 
             try {
@@ -703,6 +709,7 @@ end:
     return ret;
 }
 
+#if 0
 std::optional<component::ECDSA_Signature> Botan::OpECDSA_Sign(operation::ECDSA_Sign& op) {
     std::optional<component::ECDSA_Signature> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
@@ -798,6 +805,7 @@ std::optional<component::ECDSA_Signature> Botan::OpECDSA_Sign(operation::ECDSA_S
 end:
     return ret;
 }
+#endif
 
 std::optional<bool> Botan::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     std::optional<bool> ret = std::nullopt;

@@ -26,7 +26,7 @@ namespace secp256k1_detail {
 
         memset(out, 0, 32);
         memcpy(out + diff, v.data(), v.size());
-        
+
         return true;
     }
 
@@ -83,6 +83,20 @@ end:
         return counter == 0;
     }
 
+    std::vector<uint8_t> ECDSAPadTruncate(std::vector<uint8_t> in) {
+        if ( in.size() == 32 ) {
+            return in;
+        } else if ( in.size() > 32 ) {
+            in.resize(32);
+            return in;
+        } else {
+            const size_t diff = 32 - in.size();
+            std::vector<uint8_t> ret(32, 0);
+            memcpy(ret.data() + diff, in.data(), in.size());
+            return ret;
+        }
+    }
+
 }
 
 std::optional<component::ECC_PublicKey> secp256k1::OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) {
@@ -93,6 +107,30 @@ std::optional<component::ECC_PublicKey> secp256k1::OpECC_PrivateToPublic(operati
     ret = secp256k1_detail::OpECC_PrivateToPublic(op.priv.ToTrimmedString());
 
 end:
+    return ret;
+}
+
+std::optional<bool> secp256k1::OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) {
+    std::optional<bool> ret = std::nullopt;
+
+    secp256k1_context* ctx = nullptr;
+    secp256k1_pubkey pubkey;
+    uint8_t pubkey_bytes[65];
+    pubkey_bytes[0] = 4;
+
+    CF_CHECK_EQ(op.curveType.Get(), CF_ECC_CURVE("secp256k1"));
+    CF_CHECK_NE(ctx = secp256k1_context_create(SECP256K1_CONTEXT_VERIFY), nullptr);
+    CF_CHECK_EQ(secp256k1_detail::EncodeBignum(
+                op.pub.first.ToTrimmedString(),
+                pubkey_bytes + 1), true);
+    CF_CHECK_EQ(secp256k1_detail::EncodeBignum(
+                op.pub.second.ToTrimmedString(),
+                pubkey_bytes + 1 + 32), true);
+
+    ret = secp256k1_ec_pubkey_parse(ctx, &pubkey, pubkey_bytes, sizeof(pubkey_bytes)) == 1;
+
+end:
+    /* noret */ secp256k1_context_destroy(ctx);
     return ret;
 }
 
@@ -121,8 +159,8 @@ std::optional<component::ECDSA_Signature> secp256k1::OpECDSA_Sign(operation::ECD
                 key), true);
 
     if ( op.digestType.Get() == CF_DIGEST("NULL") ) {
-        CF_CHECK_EQ(op.cleartext.GetSize(), sizeof(hash));
-        memcpy(hash, op.cleartext.GetPtr(), sizeof(hash));
+        const auto ct = secp256k1_detail::ECDSAPadTruncate(op.cleartext.Get());
+        memcpy(hash, ct.data(), sizeof(hash));
     } else if ( op.digestType.Get() == CF_DIGEST("SHA256") ) {
         const auto _hash = crypto::sha256(op.cleartext.Get());
         memcpy(hash, _hash.data(), _hash.size());
@@ -177,7 +215,21 @@ std::optional<bool> secp256k1::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     uint8_t hash[32];
 
     CF_CHECK_EQ(op.curveType.Get(), CF_ECC_CURVE("secp256k1"));
-    
+
+    if ( op.digestType.Get() == CF_DIGEST("NULL") ) {
+        const auto ct = secp256k1_detail::ECDSAPadTruncate(op.cleartext.Get());
+        memcpy(hash, ct.data(), sizeof(hash));
+    } else if ( op.digestType.Get() == CF_DIGEST("SHA256") ) {
+        const auto _hash = crypto::sha256(op.cleartext.Get());
+        memcpy(hash, _hash.data(), _hash.size());
+    } else {
+        goto end;
+    }
+
+    /* Beyond this point, a failure definitely means that the
+     * pubkey or signature is invalid */
+    ret = false;
+
     pubkey_bytes[0] = 4;
     CF_CHECK_EQ(secp256k1_detail::EncodeBignum(
                 op.signature.pub.first.ToTrimmedString(),
@@ -192,16 +244,6 @@ std::optional<bool> secp256k1::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     CF_CHECK_EQ(secp256k1_detail::EncodeBignum(
                 op.signature.signature.second.ToTrimmedString(),
                 sig_bytes + 32), true);
-
-    if ( op.digestType.Get() == CF_DIGEST("NULL") ) {
-        CF_CHECK_EQ(op.cleartext.GetSize(), sizeof(hash));
-        memcpy(hash, op.cleartext.GetPtr(), sizeof(hash));
-    } else if ( op.digestType.Get() == CF_DIGEST("SHA256") ) {
-        const auto _hash = crypto::sha256(op.cleartext.Get());
-        memcpy(hash, _hash.data(), _hash.size());
-    } else {
-        goto end;
-    }
 
     CF_CHECK_NE(ctx = secp256k1_context_create(SECP256K1_CONTEXT_VERIFY), nullptr);
 

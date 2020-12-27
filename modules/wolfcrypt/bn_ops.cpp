@@ -46,7 +46,7 @@ end:
 bool Sub::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
     bool ret = false;
 
-#if defined(WOLFSSL_SP_MATH)
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
     /* SP math cannot represent negative numbers, so ensure the result
      * of the subtracton is always >= 0.
      *
@@ -75,7 +75,7 @@ bool Sub::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
     }
 
 end:
-#if defined(WOLFSSL_SP_MATH)
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
     if ( negative == true ) {
         return false;
     }
@@ -154,9 +154,11 @@ bool ExpMod::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
         case    0:
             CF_CHECK_EQ(mp_exptmod(bn[0].GetPtr(), bn[1].GetPtr(), bn[2].GetPtr(), res.GetPtr()), MP_OKAY);
             break;
+#if defined(WOLFSSL_SP_MATH_ALL)
         case    1:
             CF_CHECK_EQ(mp_exptmod_nct(bn[0].GetPtr(), bn[1].GetPtr(), bn[2].GetPtr(), res.GetPtr()), MP_OKAY);
             break;
+#endif
 #if !defined(WOLFSSL_SP_MATH)
         case    2:
             CF_CHECK_EQ(mp_exptmod_ex(bn[0].GetPtr(), bn[1].GetPtr(), bn[1].GetPtr()->used, bn[2].GetPtr(), res.GetPtr()), MP_OKAY);
@@ -275,8 +277,7 @@ bool Cmp::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
             CF_CHECK_EQ( res.Set("0"), true);
             break;
         default:
-            /* Invalid return value */
-            abort();
+            CF_ASSERT(0, "Compare result is not one of (MP_GT, MP_LT, MP_EQ)");
     }
 
     ret = true;
@@ -302,7 +303,7 @@ bool Neg::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
     (void)ds;
     bool ret = false;
 
-#if defined(WOLFSSL_SP_MATH)
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
     (void)res;
     (void)bn;
 #else
@@ -371,7 +372,7 @@ bool IsNeg::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
     bool ret = false;
 
-#if defined(WOLFSSL_SP_MATH)
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
     (void)res;
     (void)bn;
 #else
@@ -662,10 +663,7 @@ bool MSB::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
     const int bit = mp_leading_bit(bn[0].GetPtr());
 
-    /* Must be 0 or 1 */
-    if ( bit != 0 && bit != 1 ) {
-        abort();
-    }
+    CF_ASSERT(bit == 0 || bit == 1, "mp_leading_bit result is not one of (0, 1)");
 
     CF_CHECK_EQ( res.Set( std::to_string(bit) ), true);
 
@@ -683,10 +681,7 @@ bool NumBits::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
     const auto numBits = mp_count_bits(bn[0].GetPtr());
 
-    /* Basic sanity check */
-    if ( numBits < 0 ) {
-        abort();
-    }
+    CF_ASSERT(numBits >= 0, "mp_count_bits result is negative");
 
     CF_CHECK_EQ( res.Set( std::to_string(numBits) ), true);
 
@@ -774,9 +769,7 @@ bool Jacobi::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
                 CF_CHECK_EQ( res.Set("0"), true);
                 break;
             default:
-                printf("Error: mp_jacobi returned %d\n", jacobi);
-                /* Invalid return value */
-                abort();
+                CF_ASSERT(0, "mp_jacobi result is not one of (-1, 0, 1)");
         }
 
         ret = true;
@@ -795,7 +788,7 @@ bool Exp2::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
     const auto exponent = bn[0].AsUnsigned<unsigned int>();
     CF_CHECK_NE(exponent, std::nullopt);
-#if defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH)
+#if defined(USE_FAST_MATH) && !defined(WOLFSSL_SP_MATH) && !defined(WOLFSSL_SP_MATH_ALL)
     CF_CHECK_LT(*exponent / DIGIT_BIT, FP_SIZE);
 #endif
     CF_CHECK_EQ(mp_2expt(res.GetPtr(), *exponent), MP_OKAY);
@@ -818,10 +811,7 @@ bool NumLSZeroBits::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 #else
     const auto numBits = mp_cnt_lsb(bn[0].GetPtr());
 
-    /* Basic sanity check */
-    if ( numBits < 0 ) {
-        abort();
-    }
+    CF_ASSERT(numBits >= 0, "mp_cnt_lsb result is negative");
 
     CF_CHECK_EQ( res.Set( std::to_string(numBits) ), true);
 
@@ -887,7 +877,7 @@ bool Rand::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
             break;
         case    1:
             {
-                const auto len = ds.Get<uint16_t>() % 512;
+                const auto len = ds.Get<uint16_t>() % 100;
                 CF_CHECK_EQ(mp_rand_prime(res.GetPtr(), len, wolfCrypt_detail::GetRNG(), nullptr), MP_OKAY);
                 ret = true;
             }

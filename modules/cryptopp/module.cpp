@@ -115,8 +115,12 @@ namespace CryptoPP_detail {
                 return Function<::CryptoPP::Keccak_384>::Compute(op);
             case CF_DIGEST("KECCAK_512"):
                 return Function<::CryptoPP::Keccak_512>::Compute(op);
+/*
+            Fails in the link step in OSS-Fuzz for unclear reason
+
             case CF_DIGEST("PANAMA"):
                 return Function<::CryptoPP::Weak::PanamaHash<::CryptoPP::LittleEndian>>::Compute(op);
+*/
             default:
                 return std::nullopt;
         }
@@ -2182,6 +2186,29 @@ std::optional<component::ECC_PublicKey> CryptoPP::OpECC_PrivateToPublic(operatio
     }
 
 end:
+    return ret;
+}
+
+std::optional<bool> CryptoPP::OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) {
+    std::optional<bool> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+
+    ::CryptoPP::ECDSA<::CryptoPP::ECP, ::CryptoPP::SHA256>::PublicKey publicKey;
+
+    try {
+        const ::CryptoPP::DL_GroupParameters_EC<::CryptoPP::ECP>& curve = CryptoPP_detail::ResolveCurve(op.curveType);
+
+        publicKey.Initialize(
+                curve,
+                ::CryptoPP::ECP::Point(
+                    ::CryptoPP::Integer(op.pub.first.ToString(ds).c_str()),
+                    ::CryptoPP::Integer(op.pub.second.ToString(ds).c_str())
+                    ));
+
+        ::CryptoPP::AutoSeededRandomPool prng;
+        ret = publicKey.Validate(prng, 3);
+    } catch ( ... ) { }
+
     return ret;
 }
 

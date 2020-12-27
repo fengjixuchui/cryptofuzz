@@ -7,12 +7,9 @@
 namespace cryptofuzz {
 namespace module {
 
-class trezor_firmware : public Module {
+class rust_libsecp256k1 : public Module {
     public:
-        trezor_firmware(void);
-        std::optional<component::Digest> OpDigest(operation::Digest& op) override;
-        std::optional<component::MAC> OpHMAC(operation::HMAC& op) override;
-        std::optional<component::Key> OpKDF_PBKDF2(operation::KDF_PBKDF2& op) override;
+        rust_libsecp256k1(void);
         std::optional<component::ECC_PublicKey> OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) override;
         std::optional<bool> OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) override;
         std::optional<component::ECDSA_Signature> OpECDSA_Sign(operation::ECDSA_Sign& op) override;

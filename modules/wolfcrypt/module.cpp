@@ -122,7 +122,7 @@ namespace wolfCrypt_detail {
 
         bool which = false; try { which = ds->Get<bool>(); } catch ( ... ) { }
 
-        return which ? &rng : &rng_deterministic;
+        return which ? &rng_deterministic : &rng;
 #else
         return &rng;
 #endif
@@ -278,29 +278,17 @@ static void wolfCrypt_custom_free(void* ptr) {
 wolfCrypt::wolfCrypt(void) :
     Module("wolfCrypt") {
 
-    if ( wc_InitRng(&wolfCrypt_detail::rng) != 0 ) {
-        printf("Cannot initialize wolfCrypt RNG\n");
-        abort();
-    }
+    CF_ASSERT(wc_InitRng(&wolfCrypt_detail::rng) == 0, "Cannot initialize wolfCrypt RNG");
 
 #if defined(WOLF_CRYPTO_CB)
     /* noret */ wc_CryptoCb_Init();
 
-    if ( wc_CryptoCb_RegisterDevice(0xAABBCC, wolfCrypt_detail::CryptoCB, nullptr) != 0 ) {
-        printf("Cannot initialize CryptoCB\n");
-        abort();
-    }
-
-    if ( wc_InitRng_ex(&wolfCrypt_detail::rng_deterministic, nullptr, 0xAABBCC) != 0 ) {
-        printf("Cannot initialize wolfCrypt RNG\n");
-        abort();
-    }
+    CF_ASSERT(wc_CryptoCb_RegisterDevice(0xAABBCC, wolfCrypt_detail::CryptoCB, nullptr) == 0, "Cannot initialize CryptoCB");
+    CF_ASSERT(wc_InitRng_ex(&wolfCrypt_detail::rng_deterministic, nullptr, 0xAABBCC) == 0, "Cannot initialize deterministic wolfCrypt RNG");
 #endif /* WOLF_CRYPTO_CB */
 
     wolfCrypt_detail::SetGlobalDs(nullptr);
-    if ( wolfSSL_SetAllocators(wolfCrypt_custom_malloc, wolfCrypt_custom_free, wolfCrypt_custom_realloc) != 0 ) {
-        abort();
-    }
+    CF_ASSERT(wolfSSL_SetAllocators(wolfCrypt_custom_malloc, wolfCrypt_custom_free, wolfCrypt_custom_realloc) == 0, "Cannot set allocator functions");
 }
 
 namespace wolfCrypt_detail {
@@ -835,7 +823,58 @@ std::optional<component::Digest> wolfCrypt::OpDigest(operation::Digest& op) {
     return ret;
 }
 
+namespace wolfCrypt_detail {
+    std::optional<component::MAC> Blake2_MAC(operation::HMAC& op) {
+        std::optional<component::MAC> ret = std::nullopt;
+        Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+        wolfCrypt_detail::SetGlobalDs(&ds);
+
+        Blake2b blake2b;
+        Blake2s blake2s;
+
+        util::Multipart parts;
+        uint8_t out[64];
+
+        if ( op.digestType.Is(CF_DIGEST("BLAKE2B_MAC")) ) {
+            CF_CHECK_EQ(wc_InitBlake2b_WithKey(&blake2b, 64, op.cipher.key.GetPtr(), op.cipher.key.GetSize()), 0);
+        } else if ( op.digestType.Is(CF_DIGEST("BLAKE2S_MAC")) ) {
+            CF_CHECK_EQ(wc_InitBlake2s_WithKey(&blake2s, 64, op.cipher.key.GetPtr(), op.cipher.key.GetSize()), 0);
+        } else {
+            abort();
+        }
+
+        parts = util::ToParts(ds, op.cleartext);
+
+        if ( op.digestType.Is(CF_DIGEST("BLAKE2B_MAC")) ) {
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_Blake2bUpdate(&blake2b, part.first, part.second), 0);
+            }
+        } else if ( op.digestType.Is(CF_DIGEST("BLAKE2S_MAC")) ) {
+            for (const auto& part : parts) {
+                CF_CHECK_EQ(wc_Blake2sUpdate(&blake2s, part.first, part.second), 0);
+            }
+        }
+
+        if ( op.digestType.Is(CF_DIGEST("BLAKE2B_MAC")) ) {
+            CF_CHECK_EQ(wc_Blake2bFinal(&blake2b, out, 64), 0);
+        } else if ( op.digestType.Is(CF_DIGEST("BLAKE2S_MAC")) ) {
+            CF_CHECK_EQ(wc_Blake2sFinal(&blake2s, out, 64), 0);
+        }
+
+        ret = component::MAC(out, 64);
+end:
+        wolfCrypt_detail::UnsetGlobalDs();
+        return ret;
+    }
+} /* namespace wolfCrypt_detail */
+
 std::optional<component::MAC> wolfCrypt::OpHMAC(operation::HMAC& op) {
+    if (
+        op.digestType.Is(CF_DIGEST("BLAKE2B_MAC")) ||
+        op.digestType.Is(CF_DIGEST("BLAKE2S_MAC")) ) {
+        return wolfCrypt_detail::Blake2_MAC(op);
+    }
+
     std::optional<component::MAC> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
     wolfCrypt_detail::SetGlobalDs(&ds);
@@ -2325,16 +2364,14 @@ std::optional<component::MAC> wolfCrypt::OpCMAC(operation::CMAC& op) {
         }
     }
 
-    if ( wc_AesCmacVerify(
+    CF_ASSERT(wc_AesCmacVerify(
                     out,
                     outSize,
                     op.cleartext.GetPtr(&ds),
                     op.cleartext.GetSize(),
                     op.cipher.key.GetPtr(&ds),
-                    op.cipher.key.GetSize()) != 0 ) {
-        abort();
-    }
-
+                    op.cipher.key.GetSize()) == 0,
+            "Cannot verify self-generated CMAC");
 end:
 
     wolfCrypt_detail::UnsetGlobalDs();
@@ -2633,6 +2670,20 @@ std::optional<component::ECC_PublicKey> wolfCrypt::OpECC_PrivateToPublic(operati
         return wolfCrypt_detail::OpECC_PrivateToPublic_Ed448(op);
     } else {
         return wolfCrypt_detail::OpECC_PrivateToPublic_Generic(op);
+    }
+}
+
+std::optional<bool> wolfCrypt::OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) {
+    if ( op.curveType.Get() == CF_ECC_CURVE("x25519") ) {
+        return std::nullopt; /* TODO */
+    } else if ( op.curveType.Get() == CF_ECC_CURVE("x448") ) {
+        return std::nullopt; /* TODO */
+    } else if ( op.curveType.Get() == CF_ECC_CURVE("ed25519") ) {
+        return std::nullopt; /* TODO */
+    } else if ( op.curveType.Get() == CF_ECC_CURVE("ed448") ) {
+        return std::nullopt; /* TODO */
+    } else {
+        return wolfCrypt_detail::OpECC_ValidatePubkey_Generic(op);
     }
 }
 
