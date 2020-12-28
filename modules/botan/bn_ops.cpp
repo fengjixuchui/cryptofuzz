@@ -3,6 +3,7 @@
 #include <fuzzing/datasource/id.hpp>
 #include <botan/numthry.h>
 #include <botan/reducer.h>
+#include <botan/internal/divide.h>
 
 #include "bn_ops.h"
 
@@ -35,17 +36,56 @@ bool Mul::Run(Datasource& ds, ::Botan::BigInt& res, std::vector<::Botan::BigInt>
 }
 
 bool Div::Run(Datasource& ds, ::Botan::BigInt& res, std::vector<::Botan::BigInt>& bn) const {
-    (void)ds;
+    try {
+        switch ( ds.Get<uint8_t>() ) {
+            case    0:
+                CF_CHECK_TRUE(bn[1] != 0);
+                res = ::Botan::ct_divide(bn[0], bn[1]);
+                return true;
+            case    1:
+                {
+                    CF_CHECK_TRUE(bn[1] != 0);
+                    ::Botan::BigInt dummy;
+                    /* noret */ ::Botan::vartime_divide(bn[0], bn[1], res, dummy);
+                }
+                return true;
+            case    2:
+                {
+                    CF_CHECK_TRUE(bn[1] != 0);
+                    CF_CHECK_TRUE(bn[1] < 256);
+                    uint8_t dummy;
+                    /* noret */ ::Botan::ct_divide_u8(bn[0], bn[1].byte_at(0), res, dummy);
+                }
+                return true;
+            case    3:
+                res = bn[0] / bn[1];
+                return true;
+        }
+    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
 
-    res = bn[0] / bn[1];
-
-    return true;
+end:
+    return false;
 }
 
 bool Mod::Run(Datasource& ds, ::Botan::BigInt& res, std::vector<::Botan::BigInt>& bn) const {
-    (void)ds;
-    res = bn[0] % bn[1];
-    return true;
+    try {
+        switch ( ds.Get<uint8_t>() ) {
+            case    0:
+                {
+                    const Botan::Modular_Reducer reducer(bn[1]);
+                    res = reducer.reduce(bn[0]);
+                }
+                return true;
+            case    1:
+                res = ct_modulo(bn[0], bn[1]);
+                return true;
+            case    2:
+                res = bn[0] % bn[1];
+                return true;
+        }
+    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+    return false;
 }
 
 bool ExpMod::Run(Datasource& ds, ::Botan::BigInt& res, std::vector<::Botan::BigInt>& bn) const {
