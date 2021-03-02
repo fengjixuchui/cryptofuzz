@@ -959,6 +959,11 @@ std::optional<component::Bignum> mbedTLS::OpBignumCalc(operation::BignumCalc& op
             opRunner = std::make_unique<mbedTLS_bignum::ExpMod>();
             break;
         case    CF_CALCOP("Sqr(A)"):
+            /* Too slow with larger values */
+            CF_CHECK_LT(op.bn0.GetSize(), 1000);
+            CF_CHECK_LT(op.bn1.GetSize(), 1000);
+            CF_CHECK_LT(op.bn2.GetSize(), 1000);
+
             opRunner = std::make_unique<mbedTLS_bignum::Sqr>();
             break;
         case    CF_CALCOP("GCD(A,B)"):
@@ -1020,6 +1025,9 @@ std::optional<component::Bignum> mbedTLS::OpBignumCalc(operation::BignumCalc& op
             break;
         case    CF_CALCOP("Mod(A,B)"):
             opRunner = std::make_unique<mbedTLS_bignum::Mod>();
+            break;
+        case    CF_CALCOP("Set(A)"):
+            opRunner = std::make_unique<mbedTLS_bignum::Set>();
             break;
     }
 

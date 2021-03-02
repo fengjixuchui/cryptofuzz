@@ -1,11 +1,21 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
+#include <vector>
+#include <string>
 #include <cryptofuzz/options.h>
+#include <fuzzing/datasource/id.hpp>
+#include "repository_tbl.h"
 #include "driver.h"
+#include "numbers.h"
 
 #if defined(CRYPTOFUZZ_LIBTOMMATH) && defined(CRYPTOFUZZ_NSS)
 #error "libtommath and NSS cannot be used together due to symbol collisions"
+#endif
+
+#if defined(CRYPTOFUZZ_TREZOR_FIRMWARE) && defined(CRYPTOFUZZ_RELIC)
+#error "trezor-firmware and relic cannot be used together due to symbol collisions"
 #endif
 
 #if !defined(CRYPTOFUZZ_NO_OPENSSL)
@@ -152,11 +162,27 @@
   #include <modules/micro-ecc/module.h>
 #endif
 
+#if defined(CRYPTOFUZZ_CIFRA)
+  #include <modules/cifra/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_RELIC)
+  #include <modules/relic/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_LIBECC)
+  #include <modules/libecc/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_CHIA_BLS)
+  #include <modules/chia_bls/module.h>
+#endif
+
 std::shared_ptr<cryptofuzz::Driver> driver = nullptr;
 
 const cryptofuzz::Options* cryptofuzz_options = nullptr;
 
-extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
+static void setOptions(int argc, char** argv) {
     std::vector<std::string> extraArguments;
 
     const std::string cmdline(
@@ -164,10 +190,33 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
     );
     boost::split(extraArguments, cmdline, boost::is_any_of(" "));
 
-    const cryptofuzz::Options options(*argc, *argv, extraArguments);
+    const cryptofuzz::Options options(argc, argv, extraArguments);
 
     driver = std::make_shared<cryptofuzz::Driver>(options);
     cryptofuzz_options = driver->GetOptionsPtr();
+}
+
+static void addNumbers(void) {
+    std::set<std::string> curveNumbers;
+
+    for (size_t i = 0; i < (sizeof(ECC_CurveLUT) / sizeof(ECC_CurveLUT[0])); i++) {
+        if ( ECC_CurveLUT[i].prime ) curveNumbers.insert(*ECC_CurveLUT[i].prime);
+        if ( ECC_CurveLUT[i].a ) curveNumbers.insert(*ECC_CurveLUT[i].a);
+        if ( ECC_CurveLUT[i].b ) curveNumbers.insert(*ECC_CurveLUT[i].b);
+        if ( ECC_CurveLUT[i].x ) curveNumbers.insert(*ECC_CurveLUT[i].x);
+        if ( ECC_CurveLUT[i].y ) curveNumbers.insert(*ECC_CurveLUT[i].y);
+        if ( ECC_CurveLUT[i].order_min_1 ) curveNumbers.insert(*ECC_CurveLUT[i].order_min_1);
+        if ( ECC_CurveLUT[i].order ) curveNumbers.insert(*ECC_CurveLUT[i].order);
+    }
+
+    for (const auto& s : curveNumbers) {
+        cryptofuzz::numbers.push_back(s);
+    }
+}
+
+extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
+    setOptions(*argc, *argv);
+    addNumbers();
 
 #if !defined(CRYPTOFUZZ_NO_OPENSSL)
     driver->LoadModule( std::make_shared<cryptofuzz::module::OpenSSL>() );
@@ -311,6 +360,22 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 #if defined(CRYPTOFUZZ_MICRO_ECC)
     driver->LoadModule( std::make_shared<cryptofuzz::module::micro_ecc>() );
+#endif
+
+#if defined(CRYPTOFUZZ_CIFRA)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::cifra>() );
+#endif
+
+#if defined(CRYPTOFUZZ_RELIC)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::relic>() );
+#endif
+
+#if defined(CRYPTOFUZZ_LIBECC)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::libecc>() );
+#endif
+
+#if defined(CRYPTOFUZZ_CHIA_BLS)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::chia_bls>() );
 #endif
 
     /* TODO check if options.forceModule (if set) refers to a module that is

@@ -2,10 +2,15 @@
 #include "shared.h"
 #include "bn_ops.h"
 #include <cryptofuzz/util.h>
+#include <iostream>
 
 namespace cryptofuzz {
 namespace module {
 namespace wolfCrypt_detail {
+
+#if !defined(WOLFSSL_SP_MATH)
+#include "custom_curves.h"
+#endif
 
 #if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
     extern bool haveAllocFailure;
@@ -21,7 +26,7 @@ ECCKey::ECCKey(Datasource& ds) :
 }
 
 ECCKey::~ECCKey() {
-    /* noret */ wc_ecc_key_free(key);
+    CF_NORET(wc_ecc_key_free(key));
 }
 
 ecc_key* ECCKey::GetPtr(void) {
@@ -52,26 +57,52 @@ ecc_key* ECCKey::GetPtr(void) {
         haveAllocFailure = false;
         CF_ASSERT(wc_ecc_import_x963_ex(x963, outLen, newKey, curveID) == 0 || haveAllocFailure, "Cannot import X963-exported ECC key");
 
-        /* noret */ wc_ecc_key_free(key);
+        CF_NORET(wc_ecc_key_free(key));
         key = newKey;
         newKey = nullptr;
     }
 
 end:
     util::free(x963);
-    /* noret */ wc_ecc_key_free(newKey);
+    CF_NORET(wc_ecc_key_free(newKey));
 
     return key;
 }
 
 bool ECCKey::SetCurve(const Type& curveType) {
     bool ret = false;
-    std::optional<int> curveID;
 
-    CF_CHECK_NE(curveID = wolfCrypt_detail::toCurveID(curveType), std::nullopt);
-    this->curveID = *curveID;
+#if !defined(WOLFSSL_SP_MATH)
+    bool useCustomCurve = false;
 
-    CF_CHECK_EQ(wc_ecc_set_curve(GetPtr(), 0, *curveID), 0);
+    try {
+        useCustomCurve = ds.Get<uint8_t>();
+    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+    if ( useCustomCurve == false )
+#endif
+    {
+#if defined(CRYPTOFUZZ_WOLFCRYPT_DEBUG)
+        std::cout << "Using native curve" << std::endl;
+#endif
+        std::optional<int> curveID;
+
+        CF_CHECK_NE(curveID = wolfCrypt_detail::toCurveID(curveType), std::nullopt);
+        this->curveID = *curveID;
+
+        CF_CHECK_EQ(wc_ecc_set_curve(GetPtr(), 0, *curveID), 0);
+    }
+#if !defined(WOLFSSL_SP_MATH)
+    else {
+ #if defined(CRYPTOFUZZ_WOLFCRYPT_DEBUG)
+        std::cout << "Using custom curve" << std::endl;
+ #endif
+        const ecc_set_type* curveSpec;
+        CF_CHECK_NE(curveSpec = GetCustomCurve(curveType.Get()), nullptr);
+        CF_CHECK_EQ(wc_ecc_set_custom_curve(GetPtr(), curveSpec), 0);
+        this->curveID = ECC_CURVE_CUSTOM;
+    }
+#endif
 
     ret = true;
 
@@ -136,13 +167,13 @@ ECCPoint::ECCPoint(const ECCPoint& other) :
     }
 
     if ( wc_ecc_copy_point(other.point, point) != 0 ) {
-        /* noret */ wc_ecc_del_point(point);
+        CF_NORET(wc_ecc_del_point(point));
         throw std::exception();
     }
 }
 
 ECCPoint::~ECCPoint() {
-    /* noret */ wc_ecc_del_point(point);
+    CF_NORET(wc_ecc_del_point(point));
 }
 
 ecc_point* ECCPoint::GetPtr() {
@@ -166,18 +197,31 @@ ecc_point* ECCPoint::GetPtr() {
 
             CF_CHECK_EQ(wc_ecc_export_point_der(curveIdx, point, out, &outSz), 0);
 
-            haveAllocFailure = false;
-            CF_ASSERT(wc_ecc_import_point_der(out, outSz, curveIdx, newPoint) == 0 || haveAllocFailure, "Cannot import DER-exported ECC point");
+            {
+                haveAllocFailure = false;
+                const bool success = wc_ecc_import_point_der(out, outSz, curveIdx, newPoint) == 0;
 
-            /* noret */ wc_ecc_del_point(point);
-            point = newPoint;
-            newPoint = nullptr;
+                if ( success ) {
+                    /* Point imported. Replace old point with new point. */
+
+                    CF_NORET(wc_ecc_del_point(point));
+                    point = newPoint;
+                    newPoint = nullptr;
+                } else {
+                    /* Failure */
+
+                    if ( haveAllocFailure == false ) {
+                        /* Failure is only acceptable if an allocation failure occured, crash otherwise */
+                        CF_ASSERT(0, "Cannot import DER-exported ECC point");
+                    }
+                }
+            }
         }
     }
 
 end:
     util::free(out);
-    /* noret */ wc_ecc_del_point(newPoint);
+    CF_NORET(wc_ecc_del_point(newPoint));
 
     return point;
 }
@@ -353,10 +397,10 @@ std::optional<component::ECDSA_Signature> OpECDSA_Sign_Generic(operation::ECDSA_
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
     wolfCrypt_detail::SetGlobalDs(&ds);
 
-    std::optional<int> curveID;
     uint8_t* sig = nullptr;
     word32 sigSz = ECC_MAX_SIG_SIZE;
     uint8_t* hash = nullptr;
+    size_t hashSize = 0;
     uint8_t* nonce_bytes = nullptr;
     wolfCrypt_bignum::Bignum nonce(ds), r(ds), s(ds);
 
@@ -372,13 +416,6 @@ std::optional<component::ECDSA_Signature> OpECDSA_Sign_Generic(operation::ECDSA_
 
     try {
         ECCKey key(ds);
-        const char* name = nullptr;
-
-        CF_CHECK_NE(curveID = wolfCrypt_detail::toCurveID(op.curveType), std::nullopt);
-
-        CF_CHECK_NE(name = wc_ecc_get_name(*curveID), nullptr);
-        CF_CHECK_EQ(wc_ecc_set_curve(key.GetPtr(), 0, *curveID), 0);
-
         CF_CHECK_EQ(key.SetCurve(op.curveType), true);
         CF_CHECK_EQ(key.LoadPrivateKey(op.priv), true);
         key.GetPtr()->type = ECC_PRIVATEKEY_ONLY;
@@ -400,17 +437,31 @@ std::optional<component::ECDSA_Signature> OpECDSA_Sign_Generic(operation::ECDSA_
         CF_CHECK_NE(pub, std::nullopt);
 
         if ( op.digestType.Get() == CF_DIGEST("NULL") ) {
-            CF_CHECK_EQ(wc_ecc_sign_hash(op.cleartext.GetPtr(), op.cleartext.GetSize(), sig, &sigSz, wolfCrypt_detail::GetRNG(), key.GetPtr()), 0);
+            hashSize = op.cleartext.GetSize();
+            hash = util::malloc(hashSize);
+            if ( hashSize ) {
+                memcpy(hash, op.cleartext.GetPtr(), hashSize);
+            }
         } else {
             std::optional<wc_HashType> hashType;
             CF_CHECK_NE(hashType = wolfCrypt_detail::toHashType(op.digestType), std::nullopt);
 
-            const auto hashSize = wc_HashGetDigestSize(*hashType);
+            hashSize = wc_HashGetDigestSize(*hashType);
             hash = util::malloc(hashSize);
 
             CF_CHECK_EQ(wc_Hash(*hashType, op.cleartext.GetPtr(), op.cleartext.GetSize(), hash, hashSize), 0);
+        }
 
-            CF_CHECK_EQ(wc_ecc_sign_hash(hash, hashSize, sig, &sigSz, wolfCrypt_detail::GetRNG(), key.GetPtr()), 0);
+        /* Sign */
+        CF_CHECK_EQ(wc_ecc_sign_hash(hash, hashSize, sig, &sigSz, wolfCrypt_detail::GetRNG(), key.GetPtr()), 0);
+
+        /* Verify */
+        {
+            int verify;
+            haveAllocFailure = false;
+            if ( wc_ecc_verify_hash(sig, sigSz, hash, hashSize, &verify, key.GetPtr()) == 0 && haveAllocFailure == false ) {
+                CF_ASSERT(verify, "Cannot verify generated signature");
+            }
         }
 
         CF_CHECK_EQ(DecodeECC_DSA_Sig(sig, sigSz, r.GetPtr(), s.GetPtr()), 0);

@@ -40,6 +40,9 @@ bool Sub::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
                 CF_CHECK_EQ(mbedtls_mpi_sub_int(res.GetDestPtr(), bn[0].GetPtr(), *bn1), 0);
             }
             return true;
+        case    2:
+            CF_CHECK_EQ(mbedtls_mpi_sub_abs(res.GetDestPtr(), bn[0].GetPtr(), bn[1].GetPtr()), 0);
+            return true;
     }
 
 end:
@@ -145,6 +148,17 @@ bool Cmp::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
                 CF_CHECK_NE(bn1, std::nullopt);
 
                 res.Set( std::to_string(mbedtls_mpi_cmp_int(bn[0].GetPtr(), *bn1)) );
+            }
+            return true;
+        case    2:
+            {
+                unsigned ret;
+                CF_CHECK_EQ(mbedtls_mpi_lt_mpi_ct(bn[0].GetPtr(), bn[1].GetPtr(), &ret), 0);
+                if ( ret ) {
+                    res.Set("-1");
+                } else {
+                    return false;
+                }
             }
             return true;
     }
@@ -355,6 +369,23 @@ bool Mod::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
     ret = true;
 end:
     return ret;
+}
+
+bool Set::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
+    switch ( ds.Get<uint8_t>() ) {
+        case    0:
+            /* noret */ mbedtls_mpi_swap(res.GetDestPtr(), bn[0].GetDestPtr());
+            return true;
+        case    1:
+            CF_CHECK_EQ(mbedtls_mpi_safe_cond_assign(res.GetDestPtr(), bn[0].GetPtr(), 1), 0);
+            return true;
+        case    2:
+            CF_CHECK_EQ(mbedtls_mpi_safe_cond_swap(res.GetDestPtr(), bn[0].GetDestPtr(), 1), 0);
+            return true;
+    }
+
+end:
+    return false;
 }
 
 } /* namespace mbedTLS_bignum */

@@ -1,7 +1,9 @@
 #include <cryptofuzz/generic.h>
 #include <cryptofuzz/components.h>
 #include <cryptofuzz/util.h>
+#include <boost/multiprecision/cpp_int.hpp>
 #include "third_party/json/json.hpp"
+#include "config.h"
 
 namespace cryptofuzz {
 
@@ -85,6 +87,10 @@ std::vector<uint8_t>& Buffer::GetVectorPtr(void) {
     return data;
 }
 
+const std::vector<uint8_t>& Buffer::GetConstVectorPtr(void) const {
+    return data;
+}
+
 size_t Buffer::GetSize(void) const {
     return data.size();
 }
@@ -136,6 +142,9 @@ void Bignum::transform(void) {
 
     for (size_t i = 0; i < ptr.size(); i++) {
         if ( isdigit(ptr[i]) ) continue;
+        if ( config::kNegativeIntegers == true ) {
+            if ( i == 0 && ptr[i] == '-') continue;
+        }
         ptr[i] %= 10;
         ptr[i] += '0';
     }
@@ -147,6 +156,16 @@ bool Bignum::operator==(const Bignum& rhs) const {
 
 size_t Bignum::GetSize(void) const {
     return data.GetSize();
+}
+
+bool Bignum::IsNegative(void) const {
+    return data.GetSize() && data.GetConstVectorPtr()[0] == '-';
+}
+
+bool Bignum::IsLessThan(const std::string& other) const {
+    boost::multiprecision::cpp_int A(ToTrimmedString());
+    boost::multiprecision::cpp_int B(other);
+    return A < B;
 }
 
 std::string Bignum::ToString(void) const {
@@ -174,7 +193,12 @@ std::string Bignum::ToString(Datasource& ds) const {
         }
     } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
 
-    return zeros + ToTrimmedString();
+    auto s = ToTrimmedString();
+    const bool isNegative = IsNegative();
+    if ( s.size() && s[0] == '-' ) {
+        s.erase(0, 1);
+    }
+    return (isNegative ? "-" : "") + zeros + s;
 }
 
 nlohmann::json Bignum::ToJSON(void) const {
@@ -365,6 +389,13 @@ bool MACType::operator==(const MACType& rhs) const {
 void MACType::Serialize(Datasource& ds) const {
     ds.Put<>(mode);
     type.Serialize(ds);
+}
+
+nlohmann::json G2::ToJSON(void) const {
+    return std::vector<nlohmann::json>{
+        first.first.ToJSON(), first.second.ToJSON(),
+        second.first.ToJSON(), second.second.ToJSON()
+    };
 }
 
 } /* namespace component */

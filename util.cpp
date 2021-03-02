@@ -12,6 +12,8 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/algorithm/hex.hpp>
 #include "third_party/cpu_features/include/cpuinfo_x86.h"
+#include "mutatorpool.h"
+#include "config.h"
 
 namespace cryptofuzz {
 namespace util {
@@ -275,6 +277,28 @@ std::string ToString(const component::Bignum& val) {
     return val.ToString();
 }
 
+std::string ToString(const component::G2& val) {
+    std::string ret;
+
+    ret += "X1: ";
+    ret += val.first.first.ToString();
+    ret += "\n";
+
+    ret += "Y1: ";
+    ret += val.first.second.ToString();
+    ret += "\n";
+
+    ret += "X2: ";
+    ret += val.second.first.ToString();
+    ret += "\n";
+
+    ret += "Y2: ";
+    ret += val.second.second.ToString();
+    ret += "\n";
+
+    return ret;
+}
+
 nlohmann::json ToJSON(const Buffer& buffer) {
     return buffer.ToJSON();
 }
@@ -308,6 +332,10 @@ nlohmann::json ToJSON(const component::ECDSA_Signature& val) {
 }
 
 nlohmann::json ToJSON(const component::Bignum& val) {
+    return val.ToJSON();
+}
+
+nlohmann::json ToJSON(const component::G2& val) {
     return val.ToJSON();
 }
 
@@ -425,15 +453,13 @@ std::string HexToDec(std::string s) {
 }
 
 std::string DecToHex(std::string s, const std::optional<size_t> padTo) {
+    bool negative = false;
+    if ( s.size() && s[0] == '-' ) {
+        s.erase(0, 1);
+        negative = true;
+    }
     s.erase(0, s.find_first_not_of('0'));
     boost::multiprecision::cpp_int i(s);
-    bool negative;
-    if ( i < 0 ) {
-        negative = true;
-        i -= (i*2);
-    } else {
-        negative = false;
-    }
     std::stringstream ss;
     if ( negative == true ) {
         ss << "-";
@@ -611,6 +637,22 @@ end:
 
 std::string SHA1(const std::vector<uint8_t> data) {
     return BinToHex(crypto::sha1(data));
+}
+
+void HintBignum(const std::string bn) {
+    if ( bn.size() < config::kMaxBignumSize ) {
+        Pool_Bignum.Set(bn);
+    }
+}
+
+std::vector<uint8_t> Append(const std::vector<uint8_t> A, const std::vector<uint8_t> B) {
+    std::vector<uint8_t> ret;
+
+    ret.reserve(A.size() + B.size());
+    ret.insert(ret.end(), A.begin(), A.end());
+    ret.insert(ret.end(), B.begin(), B.end());
+
+    return ret;
 }
 
 } /* namespace util */

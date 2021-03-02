@@ -1,10 +1,12 @@
 #include "bn_ops.h"
+#include <iostream>
 
 namespace cryptofuzz {
 namespace module {
 
 namespace wolfCrypt_detail {
 #if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)
+    extern bool disableAllocationFailures;
     extern bool haveAllocFailure;
 #endif
 } /* namespace wolfCrypt_detail */
@@ -18,6 +20,9 @@ void Bignum::baseConversion(void) const {
 
     try { base = ds.Get<uint8_t>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
 
+#if defined(CRYPTOFUZZ_WOLFCRYPT_DEBUG)
+    std::cout << "Convert to base " << std::to_string(base) << " and back" << std::endl;
+#endif
     {
         int size;
         CF_CHECK_EQ(mp_radix_size(mp, base, &size), MP_OKAY);
@@ -25,7 +30,20 @@ void Bignum::baseConversion(void) const {
 
         str = (char*)util::malloc(size);
 
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL) || !defined(USE_FAST_MATH)
         CF_CHECK_EQ(mp_toradix(mp, str, base), MP_OKAY);
+#else
+        wolfCrypt_detail::haveAllocFailure = false;
+        CF_ASSERT(
+                    mp_toradix(mp, str, base) == MP_OKAY ||
+                    wolfCrypt_detail::haveAllocFailure ||
+                    base < 2 ||
+                    base > 64,
+                    "wolfCrypt cannot convert mp to string");
+
+        /* If allocation failure occurred, then do not use 'str' */
+        CF_CHECK_FALSE(wolfCrypt_detail::haveAllocFailure);
+#endif
 
         wolfCrypt_detail::haveAllocFailure = false;
         CF_ASSERT(mp_read_radix(mp, str, base) == MP_OKAY || wolfCrypt_detail::haveAllocFailure, "wolfCrypt cannot parse the output of mp_toradix");
@@ -79,7 +97,7 @@ Bignum::Bignum(const Bignum&& other) :
 
 Bignum::~Bignum() {
     if ( noFree == false ) {
-        /* noret */ mp_clear(mp);
+        CF_NORET(mp_clear(mp));
         util::free(mp);
     }
 }
@@ -124,6 +142,14 @@ end:
 
 mp_int* Bignum::GetPtr(void) const {
     {
+#if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)
+        CF_ASSERT(mp->used <= mp->size, "used is larger than size");
+#elif !defined(USE_FAST_MATH)
+        CF_ASSERT(mp->used <= mp->alloc, "used is larger than size");
+#endif
+    }
+
+    {
         /* Optionally clamp the bignum. This should not affect its value. */
 
         bool clamp = false;
@@ -131,6 +157,7 @@ mp_int* Bignum::GetPtr(void) const {
         try { clamp = ds.Get<bool>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
 
         if ( clamp ) {
+            /* Implemented as a macro so CF_NORET cannot be used here */
             /* noret */ mp_clamp(mp);
         }
     }
@@ -147,6 +174,10 @@ mp_int* Bignum::GetPtr(void) const {
         }
     }
 
+    return mp;
+}
+
+mp_int* Bignum::GetPtrDirect(void) const {
     return mp;
 }
         
@@ -329,6 +360,17 @@ BignumCluster::BignumCluster(Datasource& ds, Bignum bn0, Bignum bn1, Bignum bn2,
     bn({bn0, bn1, bn2, bn3})
 { }
 
+BignumCluster::~BignumCluster() {
+    for (size_t i = 0; i < 4; i++) {
+        if ( cache.bn[i] == nullptr ) {
+            continue;
+        }
+
+        mp_clear(cache.bn[i]);
+        util::free(cache.bn[i]);
+    }
+}
+
 Bignum& BignumCluster::operator[](const size_t index) {
     CF_ASSERT(index < bn.size(), "Invalid index requested in BignumCluster::operator[]");
 
@@ -358,7 +400,70 @@ bool BignumCluster::Set(const size_t index, const std::string s) {
 }
 
 mp_int* BignumCluster::GetDestPtr(const size_t index) {
+    /* Because it is requested as a destination pointer,
+     * this bignum will be altered, hence invalidate
+     * the cache
+     */
+    InvalidateCache();
+
     return bn[index].GetPtr();
+}
+
+void BignumCluster::Save(void) {
+    for (size_t i = 0; i < 4; i++) {
+        mp_int* cached_mp = (mp_int*)util::malloc(sizeof(mp_int));
+
+        wolfCrypt_detail::disableAllocationFailures = true;
+
+        CF_ASSERT(mp_init(cached_mp) == MP_OKAY, "mp_init failed unexpectedly");
+        CF_ASSERT(mp_copy(bn[i].GetPtrDirect(), cached_mp) == MP_OKAY, "mp_copy failed unexpectedly");
+
+        wolfCrypt_detail::disableAllocationFailures = false;
+
+        cache.bn[i] = cached_mp;
+    }
+}
+
+void BignumCluster::InvalidateCache(void) {
+    cache.invalid = true;
+}
+
+bool BignumCluster::EqualsCache(void) const {
+    if ( cache.invalid == true ) {
+        return true;
+    }
+
+    for (size_t i = 0; i < 4; i++) {
+        if ( cache.bn[i] == nullptr ) {
+            continue;
+        }
+
+        wolfCrypt_detail::disableAllocationFailures = true;
+
+        if ( mp_cmp(bn[i].GetPtrDirect(), cache.bn[i]) != MP_EQ ) {
+#if defined(CRYPTOFUZZ_WOLFCRYPT_DEBUG)
+            char str[8192];
+
+            std::cout << "Bignum with index " << std::to_string(i) << " was changed" << std::endl;
+
+            wolfCrypt_detail::disableAllocationFailures = true;
+
+            CF_ASSERT(mp_tohex(cache.bn[i], str) == MP_OKAY, "mp_tohex failed unexpectedly");
+            printf("it was: %s\n", str);
+
+            CF_ASSERT(mp_tohex(bn[i].GetPtrDirect(), str) == MP_OKAY, "mp_tohex failed unexpectedly");
+            printf("it is now %s\n", str);
+
+#endif
+            wolfCrypt_detail::disableAllocationFailures = false;
+
+            return false;
+        }
+
+        wolfCrypt_detail::disableAllocationFailures = false;
+    }
+
+    return true;
 }
 
 } /* namespace wolfCrypt_bignum */

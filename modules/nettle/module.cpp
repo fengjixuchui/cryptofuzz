@@ -1409,6 +1409,27 @@ namespace Nettle_detail {
                 return nullptr;
         }
     }
+
+    fuzzing::datasource::Datasource* ds = nullptr;
+
+    static void nettle_fuzzer_random_func(void *ctx, size_t size, uint8_t *out) {
+        (void)ctx;
+
+        CF_ASSERT(ds != nullptr, "ds is nullptr in PRNG");
+
+        if ( size == 0 ) {
+            return;
+        }
+
+        try {
+            const auto data = ds->GetData(0, size, size);
+            CF_ASSERT(data.size() == size, "Unexpected data size");
+            memcpy(out, data.data(), size);
+            return;
+        } catch ( ... ) { }
+
+        memset(out, 1, size);
+    }
 }
 #endif
 
@@ -1424,15 +1445,9 @@ std::optional<component::ECC_KeyPair> Nettle::OpECC_GenerateKeyPair(operation::E
     struct ecc_scalar priv_scalar;
     struct ecc_point pub;
     char* priv_str = nullptr, *pub_x_str = nullptr, *pub_y_str = nullptr;
-    struct knuth_lfib_ctx rctx;
     bool initialized = false;
-    uint32_t seed = 0;
 
     CF_CHECK_NE(curve = Nettle_detail::to_ecc_curve(op.curveType.Get()), nullptr);
-    try {
-        seed = ds.Get<uint32_t>();
-    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
-    /* noret */ knuth_lfib_init(&rctx, seed);
 
     /* noret */ ecc_point_init(&pub, curve);
     /* noret */ ecc_scalar_init(&priv_scalar, curve);
@@ -1442,7 +1457,9 @@ std::optional<component::ECC_KeyPair> Nettle::OpECC_GenerateKeyPair(operation::E
 
     initialized = true;
 
-    /* noret */ ecdsa_generate_keypair(&pub, &priv_scalar, &rctx, (nettle_random_func *) knuth_lfib_random);
+    Nettle_detail::ds = &ds;
+    /* noret */ ecdsa_generate_keypair(&pub, &priv_scalar, nullptr, Nettle_detail::nettle_fuzzer_random_func);
+    Nettle_detail::ds = nullptr;
 
     /* noret */ ecc_scalar_get(&priv_scalar, priv_mpz);
     priv_str = mpz_get_str(nullptr, 10, priv_mpz);
@@ -1515,6 +1532,123 @@ end:
         /* noret */ mpz_clear(pub_y);
         free(pub_x_str);
         free(pub_y_str);
+    }
+#endif
+
+    return ret;
+}
+
+std::optional<bool> Nettle::OpECDSA_Verify(operation::ECDSA_Verify& op) {
+    std::optional<bool> ret = std::nullopt;
+
+#if !defined(HAVE_LIBHOGWEED)
+    (void)op;
+#else
+    if ( !op.digestType.Is(CF_DIGEST("NULL")) ) {
+        return ret;
+    }
+
+    mpz_t pub_x, pub_y;
+    struct ecc_point pub;
+    struct dsa_signature signature;
+    bool initialized = false;
+
+    const struct ecc_curve* curve = nullptr;
+
+    CF_CHECK_NE(curve = Nettle_detail::to_ecc_curve(op.curveType.Get()), nullptr);
+
+    /* noret */ ecc_point_init(&pub, curve);
+    /* noret */ mpz_init(pub_x);
+    /* noret */ mpz_init(pub_y);
+    /* noret */ dsa_signature_init(&signature);
+    initialized = true;
+
+    CF_CHECK_EQ(mpz_init_set_str(pub_x, op.signature.pub.first.ToTrimmedString().c_str(), 0), 0);
+    CF_CHECK_EQ(mpz_init_set_str(pub_y, op.signature.pub.second.ToTrimmedString().c_str(), 0), 0);
+    CF_CHECK_EQ(ecc_point_set(&pub, pub_x, pub_y), 1);
+    CF_CHECK_EQ(mpz_set_str(signature.r, op.signature.signature.first.ToTrimmedString().c_str(), 0), 0);
+    CF_CHECK_EQ(mpz_set_str(signature.s, op.signature.signature.second.ToTrimmedString().c_str(), 0), 0);
+
+    ret = ecdsa_verify(&pub, op.cleartext.GetSize(), op.cleartext.GetPtr(), &signature);
+end:
+    if ( initialized == true ) {
+        /* noret */ mpz_clear(pub_x);
+        /* noret */ mpz_clear(pub_y);
+        /* noret */ ecc_point_clear(&pub);
+        /* noret */ dsa_signature_clear(&signature);
+    }
+#endif
+
+    return ret;
+}
+
+std::optional<component::ECDSA_Signature> Nettle::OpECDSA_Sign(operation::ECDSA_Sign& op) {
+    std::optional<component::ECDSA_Signature> ret = std::nullopt;
+
+#if !defined(HAVE_LIBHOGWEED)
+    (void)op;
+#else
+    if ( op.UseRandomNonce() == false ) {
+        return ret;
+    }
+    if ( !op.digestType.Is(CF_DIGEST("NULL")) ) {
+        return ret;
+    }
+
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+
+    mpz_t priv_mpz, pub_x, pub_y;
+    struct ecc_scalar priv_scalar;
+    struct ecc_point pub;
+    struct dsa_signature signature;
+    char *pub_x_str = nullptr, *pub_y_str = nullptr, *sig_r_str = nullptr, *sig_s_str = nullptr;
+    bool initialized = false;
+
+    const struct ecc_curve* curve = nullptr;
+
+    CF_CHECK_NE(curve = Nettle_detail::to_ecc_curve(op.curveType.Get()), nullptr);
+
+    /* noret */ ecc_point_init(&pub, curve);
+    /* noret */ mpz_init(pub_x);
+    /* noret */ mpz_init(pub_y);
+    /* noret */ dsa_signature_init(&signature);
+    /* noret */ ecc_scalar_init(&priv_scalar, curve);
+    /* noret */ mpz_init(priv_mpz);
+    initialized = true;
+
+    CF_CHECK_EQ(mpz_init_set_str(priv_mpz, op.priv.ToTrimmedString().c_str(), 0), 0);
+    CF_CHECK_EQ(ecc_scalar_set(&priv_scalar, priv_mpz), 1);
+
+    Nettle_detail::ds = &ds;
+    /* noret */ ecdsa_sign(
+            &priv_scalar,
+            nullptr, Nettle_detail::nettle_fuzzer_random_func,
+            op.cleartext.GetSize(), op.cleartext.GetPtr(), &signature);
+    Nettle_detail::ds = nullptr;
+
+    sig_r_str = mpz_get_str(nullptr, 10, signature.r);
+    sig_s_str = mpz_get_str(nullptr, 10, signature.s);
+
+    /* noret */ ecc_point_mul_g(&pub, &priv_scalar);
+    /* noret */ ecc_point_get(&pub, pub_x, pub_y);
+
+    pub_x_str = mpz_get_str(nullptr, 10, pub_x);
+    pub_y_str = mpz_get_str(nullptr, 10, pub_y);
+
+    ret = { {sig_r_str, sig_s_str}, {pub_x_str, pub_y_str} };
+
+end:
+    if ( initialized == true ) {
+        /* noret */ mpz_clear(pub_x);
+        /* noret */ mpz_clear(pub_y);
+        /* noret */ ecc_scalar_clear(&priv_scalar);
+        /* noret */ dsa_signature_clear(&signature);
+        /* noret */ mpz_clear(priv_mpz);
+        /* noret */ ecc_point_clear(&pub);
+        free(pub_x_str);
+        free(pub_y_str);
+        free(sig_r_str);
+        free(sig_s_str);
     }
 #endif
 

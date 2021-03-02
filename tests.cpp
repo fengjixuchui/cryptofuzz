@@ -353,6 +353,36 @@ void test(const operation::DH_Derive& op, const std::optional<component::Bignum>
     (void)result;
 }
 
+void test(const operation::BLS_PrivateToPublic& op, const std::optional<component::BLS_PublicKey>& result) {
+    (void)op;
+    (void)result;
+}
+
+void test(const operation::BLS_Sign& op, const std::optional<component::BLS_Signature>& result) {
+    (void)op;
+    (void)result;
+}
+
+void test(const operation::BLS_Verify& op, const std::optional<bool>& result) {
+    (void)op;
+    (void)result;
+}
+
+void test(const operation::BLS_Pairing& op, const std::optional<bool>& result) {
+    (void)op;
+    (void)result;
+}
+
+void test(const operation::BLS_HashToG1& op, const std::optional<component::G1>& result) {
+    (void)op;
+    (void)result;
+}
+
+void test(const operation::BLS_HashToG2& op, const std::optional<component::G2>& result) {
+    (void)op;
+    (void)result;
+}
+
 namespace BignumCalc {
     static void Abort(const std::string& message, const std::string& opStr) {
         std::cout << "BignumCalc ( " << opStr << " ): " << message << std::endl;
@@ -407,6 +437,13 @@ void test(const operation::BignumCalc& op, const std::optional<component::Bignum
     using namespace BignumCalc;
 
     const auto calcOp = op.calcOp.Get();
+
+    /* Negative numbers are not supported yet */
+    if (    op.bn0.IsNegative() ||
+            op.bn1.IsNegative() ||
+            op.bn2.IsNegative() ) {
+        return;
+    }
 
     switch ( calcOp ) {
         case    CF_CALCOP("Add(A,B)"):

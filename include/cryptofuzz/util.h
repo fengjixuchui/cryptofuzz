@@ -17,6 +17,8 @@
 #define CF_CHECK_TRUE(expr) if ( !(expr) ) { goto end; }
 #define CF_CHECK_FALSE(expr) if ( (expr) ) { goto end; }
 #define CF_ASSERT(expr, msg) if ( !(expr) ) { printf("Cryptofuzz assertion failure: %s\n", msg); abort(); }
+#define CF_UNREACHABLE() CF_ASSERT(0, "This code is supposed to be unreachable")
+#define CF_NORET(expr) {static_assert(std::is_same<decltype(expr), void>::value, "void"); (expr);}
 
 namespace cryptofuzz {
 namespace util {
@@ -39,6 +41,7 @@ std::string ToString(const component::ECC_PublicKey& val);
 std::string ToString(const component::ECC_KeyPair& val);
 std::string ToString(const component::ECDSA_Signature& val);
 std::string ToString(const component::Bignum& val);
+std::string ToString(const component::G2& val);
 nlohmann::json ToJSON(const Buffer& buffer);
 nlohmann::json ToJSON(const bool val);
 nlohmann::json ToJSON(const component::Ciphertext& val);
@@ -46,6 +49,7 @@ nlohmann::json ToJSON(const component::ECC_PublicKey& val);
 nlohmann::json ToJSON(const component::ECC_KeyPair& val);
 nlohmann::json ToJSON(const component::ECDSA_Signature& val);
 nlohmann::json ToJSON(const component::Bignum& val);
+nlohmann::json ToJSON(const component::G2& val);
 uint8_t* GetNullPtr(fuzzing::datasource::Datasource* ds = nullptr);
 uint8_t* malloc(const size_t n);
 uint8_t* realloc(void* ptr, const size_t n);
@@ -64,6 +68,8 @@ std::optional<std::vector<uint8_t>> ToDER(const std::string A, const std::string
 std::optional<std::pair<std::string, std::string>> SignatureFromDER(const std::string s);
 std::optional<std::pair<std::string, std::string>> SignatureFromDER(const std::vector<uint8_t> data);
 std::string SHA1(const std::vector<uint8_t> data);
+void HintBignum(const std::string bn);
+std::vector<uint8_t> Append(const std::vector<uint8_t> A, const std::vector<uint8_t> B);
 
 } /* namespace util */
 } /* namespace cryptofuzz */

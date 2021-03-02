@@ -27,7 +27,46 @@ Botan::Botan(void) :
     }
 }
 
+#if !defined(CRYPTOFUZZ_BOTAN_IS_ORACLE)
+ #define BOTAN_FUZZER_RNG Botan_detail::Fuzzer_RNG rng(ds);
+#else
+ #define BOTAN_FUZZER_RNG ::Botan::System_RNG rng;
+#endif /* CRYPTOFUZZ_BOTAN_IS_ORACLE */
+
 namespace Botan_detail {
+
+#if !defined(CRYPTOFUZZ_BOTAN_IS_ORACLE)
+    class Fuzzer_RNG final : public ::Botan::RandomNumberGenerator {
+        private:
+            Datasource& ds;
+        public:
+            Fuzzer_RNG(Datasource& ds) :
+                ds(ds)
+            { }
+
+            bool is_seeded() const override { return true; }
+
+            bool accepts_input() const override { return false; }
+
+            void clear() override {}
+
+            virtual void randomize(uint8_t output[], size_t length) override {
+                if ( length == 0 ) {
+                    return;
+                }
+
+                const auto data = ds.GetData(0, length, length);
+
+                memcpy(output, data.data(), length);
+            }
+
+            void add_entropy(const uint8_t[], size_t) override {
+            }
+
+            std::string name() const override { return "Fuzzer_RNG"; }
+    };
+#endif /* CRYPTOFUZZ_BOTAN_IS_ORACLE */
+
     const std::string parenthesize(const std::string parent, const std::string child) {
         static const std::string pOpen("(");
         static const std::string pClose(")");
@@ -84,9 +123,10 @@ again:
 
         if ( numClears < 3 ) {
             try {
+#if !defined(CRYPTOFUZZ_BOTAN_IS_ORACLE)
                 clear = ds.Get<bool>();
-            } catch ( ... ) {
-            }
+#endif /* CRYPTOFUZZ_BOTAN_IS_ORACLE */
+            } catch ( ... ) { }
         }
 
         if ( clear == true ) {
@@ -777,21 +817,53 @@ end:
 
 std::optional<component::ECC_KeyPair> Botan::OpECC_GenerateKeyPair(operation::ECC_GenerateKeyPair& op) {
     std::optional<component::ECC_KeyPair> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
 
     std::optional<std::string> curveString;
-    static ::Botan::System_RNG rng;
+    BOTAN_FUZZER_RNG;
 
     CF_CHECK_NE(curveString = Botan_detail::CurveIDToString(op.curveType.Get()), std::nullopt);
 
-    {
+    try {
         ::Botan::EC_Group group(*curveString);
         auto priv = ::Botan::ECDSA_PrivateKey(rng, group);
 
         const auto pub_x = priv.public_point().get_affine_x();
         const auto pub_y = priv.public_point().get_affine_y();
 
+        {
+            const auto pub = std::make_unique<::Botan::ECDSA_PublicKey>(::Botan::ECDSA_PublicKey(group, priv.public_point()));
+            CF_ASSERT(pub->check_key(rng, true) == true, "Generated pubkey fails validation");
+        }
+
         ret = { priv.private_value().to_dec_string(), { pub_x.to_dec_string(), pub_y.to_dec_string() } };
-    }
+
+      /* Catch exception thrown from Botan_detail::Fuzzer_RNG::randomize */
+    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+end:
+    return ret;
+}
+
+std::optional<bool> Botan::OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) {
+    std::optional<bool> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+
+    BOTAN_FUZZER_RNG;
+    std::unique_ptr<::Botan::Public_Key> pub = nullptr;
+
+    try {
+        std::optional<std::string> curveString;
+        CF_CHECK_NE(curveString = Botan_detail::CurveIDToString(op.curveType.Get()), std::nullopt);
+
+        ::Botan::EC_Group group(*curveString);
+        const ::Botan::BigInt pub_x(op.pub.first.ToString(ds));
+        const ::Botan::BigInt pub_y(op.pub.second.ToString(ds));
+        const ::Botan::PointGFp public_point = group.point(pub_x, pub_y);
+        pub = std::make_unique<::Botan::ECDSA_PublicKey>(::Botan::ECDSA_PublicKey(group, public_point));
+
+        ret = pub->check_key(rng, true);
+    } catch ( ... ) { }
 
 end:
     return ret;
@@ -801,7 +873,8 @@ std::optional<component::ECC_PublicKey> Botan::OpECC_PrivateToPublic(operation::
     std::optional<component::ECC_PublicKey> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
 
-    static ::Botan::System_RNG rng;
+    BOTAN_FUZZER_RNG;
+
     try {
         std::optional<std::string> curveString;
 
@@ -842,7 +915,6 @@ end:
     return ret;
 }
 
-#if 0
 std::optional<component::ECDSA_Signature> Botan::OpECDSA_Sign(operation::ECDSA_Sign& op) {
     std::optional<component::ECDSA_Signature> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
@@ -851,7 +923,7 @@ std::optional<component::ECDSA_Signature> Botan::OpECDSA_Sign(operation::ECDSA_S
     std::unique_ptr<::Botan::Public_Key> pub = nullptr;
     std::unique_ptr<::Botan::PK_Signer> signer;
 
-    static ::Botan::System_RNG rng;
+    BOTAN_FUZZER_RNG;
 
     CF_CHECK_EQ(op.UseRFC6979Nonce(), true);
     CF_CHECK_EQ(op.digestType.Get(), CF_DIGEST("SHA256"));
@@ -887,7 +959,7 @@ std::optional<component::ECDSA_Signature> Botan::OpECDSA_Sign(operation::ECDSA_S
             /* Retrieve R and S */
             {
                 ::Botan::BER_Decoder decoder(signature);
-                ::Botan::BER_Decoder ber_sig = decoder.start_cons(::Botan::SEQUENCE);
+                ::Botan::BER_Decoder ber_sig = decoder.start_sequence();
 
                 size_t count = 0;
 
@@ -938,7 +1010,6 @@ std::optional<component::ECDSA_Signature> Botan::OpECDSA_Sign(operation::ECDSA_S
 end:
     return ret;
 }
-#endif
 
 std::optional<bool> Botan::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     std::optional<bool> ret = std::nullopt;
@@ -993,7 +1064,7 @@ std::optional<component::Bignum> Botan::OpDH_Derive(operation::DH_Derive& op) {
     std::optional<component::Bignum> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
 
-    static ::Botan::System_RNG rng;
+    BOTAN_FUZZER_RNG;
 
     try {
         CF_CHECK_NE(op.priv.ToTrimmedString(), "0");
@@ -1051,6 +1122,11 @@ std::optional<component::Bignum> Botan::OpBignumCalc(operation::BignumCalc& op) 
             opRunner = std::make_unique<Botan_bignum::Mod>();
             break;
         case    CF_CALCOP("ExpMod(A,B,C)"):
+            /* Too slow with larger values */
+            CF_CHECK_LT(op.bn0.GetSize(), 1000);
+            CF_CHECK_LT(op.bn1.GetSize(), 1000);
+            CF_CHECK_LT(op.bn2.GetSize(), 1000);
+
             opRunner = std::make_unique<Botan_bignum::ExpMod>();
             break;
         case    CF_CALCOP("Sqr(A)"):

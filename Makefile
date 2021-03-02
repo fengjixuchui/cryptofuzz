@@ -4,7 +4,7 @@ CXXFLAGS += -Wall -Wextra -std=c++17 -I include/ -I . -I fuzzing-headers/include
 
 driver.o : driver.cpp
 	$(CXX) $(CXXFLAGS) driver.cpp -c -o driver.o
-executor.o : executor.cpp
+executor.o : executor.cpp config.h
 	$(CXX) $(CXXFLAGS) executor.cpp -c -o executor.o
 util.o : util.cpp
 	$(CXX) $(CXXFLAGS) util.cpp -c -o util.o
@@ -22,23 +22,25 @@ repository.o : repository.cpp repository_tbl.h
 	$(CXX) $(CXXFLAGS) repository.cpp -c -o repository.o
 options.o : options.cpp
 	$(CXX) $(CXXFLAGS) options.cpp -c -o options.o
-components.o : components.cpp
+components.o : components.cpp config.h
 	$(CXX) $(CXXFLAGS) components.cpp -c -o components.o
 wycheproof.o : wycheproof.cpp
 	$(CXX) $(CXXFLAGS) wycheproof.cpp -c -o wycheproof.o
 crypto.o : crypto.cpp
 	$(CXX) $(CXXFLAGS) crypto.cpp -c -o crypto.o
-mutator.o : mutator.cpp
+mutator.o : mutator.cpp config.h
 	$(CXX) $(CXXFLAGS) mutator.cpp -c -o mutator.o
+numbers.o : numbers.cpp
+	$(CXX) $(CXXFLAGS) -O0 numbers.cpp -c -o numbers.o
 mutatorpool.o : mutatorpool.cpp
 	$(CXX) $(CXXFLAGS) mutatorpool.cpp -c -o mutatorpool.o
 
 third_party/cpu_features/build/libcpu_features.a :
 	cd third_party/cpu_features && rm -rf build && mkdir build && cd build && cmake .. && make
 
-cryptofuzz : driver.o executor.o util.o entry.o tests.o operation.o datasource.o repository.o options.o components.o wycheproof.o crypto.o mutator.o mutatorpool.o third_party/cpu_features/build/libcpu_features.a
+cryptofuzz : driver.o executor.o util.o entry.o tests.o operation.o datasource.o repository.o options.o components.o wycheproof.o crypto.o mutator.o numbers.o mutatorpool.o third_party/cpu_features/build/libcpu_features.a
 	test $(LIBFUZZER_LINK)
-	$(CXX) $(CXXFLAGS) driver.o executor.o util.o entry.o tests.o operation.o datasource.o repository.o options.o components.o wycheproof.o crypto.o mutator.o mutatorpool.o $(shell find modules -type f -name module.a) $(LIBFUZZER_LINK) third_party/cpu_features/build/libcpu_features.a $(LINK_FLAGS) -o cryptofuzz
+	$(CXX) $(CXXFLAGS) driver.o executor.o util.o entry.o tests.o operation.o datasource.o repository.o options.o components.o wycheproof.o crypto.o mutator.o numbers.o mutatorpool.o $(shell find modules -type f -name module.a) $(LIBFUZZER_LINK) third_party/cpu_features/build/libcpu_features.a $(LINK_FLAGS) -o cryptofuzz
 
 generate_dict: generate_dict.cpp
 	$(CXX) $(CXXFLAGS) generate_dict.cpp -o generate_dict

@@ -95,5 +95,22 @@ For instructions on how to run Cryptofuzz, please see [`docs/running.md`](docs/r
 - micro-ecc: [ECDSA verification fails when it should succeed](https://github.com/kmackay/micro-ecc/issues/179#issuecomment-734515934)
 - Parity libsecp256k1: [RFC6979 signature discrepancy if input is curve order](https://github.com/paritytech/libsecp256k1/issues/62)
 - LibreSSL: [ECDSA verification succeeds with invalid public key](https://github.com/openbsd/src/commit/ea076652f78324977b6dc08890965b6823672c02)
-- SymCrypt: Uninitialized memory used as array index in ECDSA verification if hash is 0
+- SymCrypt: [Uninitialized memory used as array index in ECDSA verification if hash is 0](https://github.com/microsoft/SymCrypt/commit/13fa454049fa265fa9e929a3a508907d259024a6)
+- TBA: TBA
+- NSS/ecckiila: [ECDSA verification fails for all-zero hash](https://gitlab.com/nisec/ecckiila/-/commit/ec77867e336827705e67bb9b10538a7980b850fa)
+- mbed TLS: [mbedtls_mpi_sub_abs memory corruption](https://github.com/ARMmbed/mbedtls/issues/4042)
+- relic: [Out-of-bounds read via bn_sqr_basic](https://github.com/relic-toolkit/relic/issues/172)
+- relic: [Wrong square root computation](https://github.com/relic-toolkit/relic/issues/173)
+- relic: [ECDSA verification discrepancies](https://github.com/relic-toolkit/relic/issues/175)
+- relic: [bn_write_str buffer overflow](https://github.com/relic-toolkit/relic/issues/176)
+- Nettle: [ECDSA verification fails for all-zero hash](https://github.com/gnutls/nettle/commit/b3d0bcf5a185842d2c717927eef03577fd61a912)
+- relic: [Buffer overflow via bn_mxp_slide](https://github.com/relic-toolkit/relic/commit/bba5b5fa5489706ab4eaf5d7d0c2550e0a9722c0)
+- relic: [bn_mxp_monty incorrect result](https://github.com/relic-toolkit/relic/commit/d411fabf2358553937fffb3242a57ee711746859)
+- relic: Several other memory and correctness bugs
+- libgcrypt: [ECDSA verification succeeds with invalid public key](https://lists.gnupg.org/pipermail/gcrypt-devel/2021-January/005091.html)
+- libgcrypt: [Out-of-bounds read in SHA256](https://lists.gnupg.org/pipermail/gcrypt-devel/2021-February/005105.html)
+- SymCrypt: [Invalid ECDSA signature and public key for private key that is curve order](https://github.com/microsoft/SymCrypt/issues/12)
+- SymCrypt: [ECDSA signing branches on uninitialized memory](https://github.com/microsoft/SymCrypt/issues/13)
+- TBA: TBA
+- TBA: TBA
 - TBA: TBA

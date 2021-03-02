@@ -845,6 +845,10 @@ std::optional<bool> NSS::OpECDSA_Verify(operation::ECDSA_Verify& op) {
         ecpub.ecParams.arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
         CF_CHECK_EQ(EC_CopyParams(ecpub.ecParams.arena, &ecpub.ecParams, ecparams), SECSuccess);
         ecpub.publicValue = {siBuffer, pub.data(), static_cast<unsigned int>(pub.size())};
+        if ( EC_ValidatePublicKey(ecparams, &ecpub.publicValue) != SECSuccess ) {
+            ret = false;
+            goto end;
+        }
     }
 
     hash_item = {siBuffer, ct.data(), static_cast<unsigned int>(ct.size())};
@@ -857,6 +861,36 @@ end:
     }
     if (ecpub.ecParams.arena) {
         PORT_FreeArena(ecpub.ecParams.arena, PR_FALSE);
+    }
+
+    return ret;
+}
+
+std::optional<bool> NSS::OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) {
+    std::optional<bool> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+
+    ECParams* ecparams = nullptr;
+    std::vector<uint8_t> pub;
+    SECItem publicValue;
+
+    CF_CHECK_NE(ecparams = nss_detail::ToECParams(op.curveType), nullptr);
+
+    {
+        std::optional<std::vector<uint8_t>> pub_x, pub_y;
+        CF_CHECK_NE(pub_x = util::DecToBin(op.pub.first.ToTrimmedString(), ecparams->order.len), std::nullopt);
+        CF_CHECK_NE(pub_y = util::DecToBin(op.pub.second.ToTrimmedString(), ecparams->order.len), std::nullopt);
+        pub.push_back(0x04);
+        pub.insert(std::end(pub), std::begin(*pub_x), std::end(*pub_x));
+        pub.insert(std::end(pub), std::begin(*pub_y), std::end(*pub_y));
+        publicValue = {siBuffer, pub.data(), static_cast<unsigned int>(pub.size())};
+    }
+
+    ret = EC_ValidatePublicKey(ecparams, &publicValue) == SECSuccess;
+
+end:
+    if (ecparams) {
+        PORT_FreeArena(ecparams->arena, PR_FALSE);
     }
 
     return ret;
@@ -915,7 +949,7 @@ std::optional<component::ECDSA_Signature> NSS::OpECDSA_Sign(operation::ECDSA_Sig
 
         const auto pubkey = nss_detail::ToPublicKey(privKey);
 
-        ret = {{pubkey.first, pubkey.second}, {R, S} };
+        ret = {{R, S}, {pubkey.first, pubkey.second} };
     }
 end:
     if ( privKey ) {
