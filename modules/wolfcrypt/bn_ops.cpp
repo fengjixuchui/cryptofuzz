@@ -328,6 +328,10 @@ bool GCD::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
     bool ret = false;
 
+    /* mp_gcd does not support negative numbers */
+    CF_CHECK_NE(mp_cmp_d(bn[0].GetPtr(), 0), MP_LT);
+    CF_CHECK_NE(mp_cmp_d(bn[1].GetPtr(), 0), MP_LT);
+
     MP_CHECK_EQ(mp_gcd(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
 
     ret = true;
@@ -603,8 +607,19 @@ bool SubMod::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
             MP_CHECK_EQ(mp_submod(bn[0].GetPtr(), bn[1].GetPtr(), bn[2].GetPtr(), res.GetPtr()), MP_OKAY);
             break;
         case    1:
-            CF_CHECK_EQ(wolfCrypt_bignum_detail::compare(bn[0], bn[1], ds), MP_LT)
+            /* mp_submod_ct does not support negative numbers */
+            CF_CHECK_NE(mp_cmp_d(bn[0].GetPtr(), 0), MP_LT);
+            CF_CHECK_NE(mp_cmp_d(bn[1].GetPtr(), 0), MP_LT);
+            CF_CHECK_NE(mp_cmp_d(bn[2].GetPtr(), 0), MP_LT);
+
+            /* mp_submod_ct documentation states that:
+             *
+             * A < modulo
+             * B < modulo
+             */
+            CF_CHECK_EQ(wolfCrypt_bignum_detail::compare(bn[0], bn[2], ds), MP_LT)
             CF_CHECK_EQ(wolfCrypt_bignum_detail::compare(bn[1], bn[2], ds), MP_LT)
+
             MP_CHECK_EQ(mp_submod_ct(bn[0].GetPtr(), bn[1].GetPtr(), bn[2].GetPtr(), res.GetPtr()), MP_OKAY);
             break;
         default:
@@ -698,9 +713,19 @@ end:
 }
 
 bool LCM::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
+#if defined(WOLFSSL_SP_MATH)
+    (void)ds;
+    (void)res;
+    (void)bn;
+    return false;
+#else
     (void)ds;
 
     bool ret = false;
+
+    /* mp_lcm does not support negative numbers */
+    CF_CHECK_NE(mp_cmp_d(bn[0].GetPtr(), 0), MP_LT);
+    CF_CHECK_NE(mp_cmp_d(bn[1].GetPtr(), 0), MP_LT);
 
     MP_CHECK_EQ(mp_lcm(bn[0].GetPtr(), bn[1].GetPtr(), res.GetPtr()), MP_OKAY);
 
@@ -708,6 +733,7 @@ bool LCM::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
 
 end:
     return ret;
+#endif
 }
 
 bool Mod::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
