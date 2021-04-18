@@ -23,22 +23,14 @@ namespace cryptofuzz {
 namespace module {
 
 namespace mbedTLS_detail {
-#if defined(CRYPTOFUZZ_MBEDTLS_ALLOCATION_FAILURES)
     Datasource* ds;
-#endif
 
     inline void SetGlobalDs(Datasource* ds) {
-#if defined(CRYPTOFUZZ_MBEDTLS_ALLOCATION_FAILURES)
         mbedTLS_detail::ds = ds;
-#else
-        (void)ds;
-#endif
     }
 
     inline void UnsetGlobalDs(void) {
-#if defined(CRYPTOFUZZ_MBEDTLS_ALLOCATION_FAILURES)
         mbedTLS_detail::ds = nullptr;
-#endif
     }
 
     inline bool AllocationFailure(void) {
@@ -85,6 +77,26 @@ mbedTLS::mbedTLS(void) :
 }
 
 namespace mbedTLS_detail {
+    int RNG(void* arg, unsigned char* out, size_t size) {
+        (void)arg;
+
+        CF_ASSERT(ds != nullptr, "global DS is NULL");
+
+        if ( size == 0 ) {
+            return 0;
+        }
+
+        try {
+            const auto data = ds->GetData(0, size, size);
+            CF_ASSERT(data.size() == (size_t)size, "Unexpected data size");
+            memcpy(out, data.data(), size);
+
+            return 0;
+        } catch ( ... ) { }
+
+        return -1;
+    }
+
     const mbedtls_cipher_info_t* to_mbedtls_cipher_info_t(const component::SymmetricCipherType cipherType) {
         using fuzzing::datasource::ID;
 
@@ -161,17 +173,12 @@ namespace mbedTLS_detail {
             { CF_CIPHER("AES_256_XTS"), MBEDTLS_CIPHER_AES_256_XTS  },
             { CF_CIPHER("CHACHA20"), MBEDTLS_CIPHER_CHACHA20  },
             { CF_CIPHER("CHACHA20_POLY1305"), MBEDTLS_CIPHER_CHACHA20_POLY1305  },
-            /* Enable this once https://github.com/ARMmbed/mbedtls/issues/3665
-             * is fixed.
-             */
-#if 0
             { CF_CIPHER("AES_128_WRAP"), MBEDTLS_CIPHER_AES_128_KW  },
             { CF_CIPHER("AES_128_WRAP_PAD"), MBEDTLS_CIPHER_AES_128_KWP  },
             { CF_CIPHER("AES_192_WRAP"), MBEDTLS_CIPHER_AES_192_KW  },
             { CF_CIPHER("AES_192_WRAP_PAD"), MBEDTLS_CIPHER_AES_192_KWP  },
             { CF_CIPHER("AES_256_WRAP"), MBEDTLS_CIPHER_AES_256_KW  },
             { CF_CIPHER("AES_256_WRAP_PAD"), MBEDTLS_CIPHER_AES_256_KWP },
-#endif
         };
 
         if ( LUT.find(cipherType.Get()) == LUT.end() ) {
@@ -833,7 +840,7 @@ std::optional<component::ECC_PublicKey> mbedTLS::OpECC_PrivateToPublic(operation
     mbedtls_ecp_keypair keypair;
     const mbedtls_ecp_curve_info* curve_info = nullptr;
 
-    /* noret */ mbedtls_ecp_keypair_init(&keypair);
+    CF_NORET(mbedtls_ecp_keypair_init(&keypair));
 
     {
         std::optional<uint16_t> tls_id;
@@ -859,18 +866,83 @@ std::optional<component::ECC_PublicKey> mbedTLS::OpECC_PrivateToPublic(operation
     }
 
 end:
-    /* noret */ mbedtls_ecp_keypair_free(&keypair);
+    CF_NORET(mbedtls_ecp_keypair_free(&keypair));
 
     mbedTLS_detail::UnsetGlobalDs();
 
     return ret;
 }
 
+std::optional<component::ECDSA_Signature> mbedTLS::OpECDSA_Sign(operation::ECDSA_Sign& op) {
+    if ( !op.digestType.Is(CF_DIGEST("NULL")) ) {
+        return std::nullopt;
+    }
+
+    std::optional<component::ECDSA_Signature> ret = std::nullopt;
+    Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
+    mbedTLS_detail::SetGlobalDs(&ds);
+
+    const mbedtls_ecp_curve_info* curve_info = nullptr;
+    mbedtls_ecp_keypair keypair;
+    mbedtls_mpi sig_r, sig_s;
+
+    CF_NORET(mbedtls_ecp_keypair_init(&keypair));
+    CF_NORET(mbedtls_mpi_init(&sig_r));
+    CF_NORET(mbedtls_mpi_init(&sig_s));
+
+    CF_CHECK_EQ(op.UseRandomNonce(), true);
+
+    {
+        std::optional<uint16_t> tls_id;
+        CF_CHECK_NE(tls_id = mbedTLS_detail::toTLSID(op.curveType), std::nullopt);
+        CF_CHECK_NE(curve_info = mbedtls_ecp_curve_info_from_tls_id(*tls_id), nullptr);
+    }
+
+    CF_CHECK_EQ(mbedtls_ecp_group_load(&keypair.grp, curve_info->grp_id), 0);
+
+    /* Private key */
+    CF_CHECK_EQ(mbedtls_mpi_read_string(&keypair.d, 10, op.priv.ToString(ds).c_str()), 0);
+
+    {
+        const auto CT = op.cleartext.ECDSA_RandomPad(ds, op.curveType);
+        CF_CHECK_EQ(mbedtls_ecdsa_sign(&keypair.grp, &sig_r, &sig_s, &keypair.d, CT.GetPtr(), CT.GetSize(), mbedTLS_detail::RNG, nullptr), 0);
+    }
+
+    CF_CHECK_EQ(mbedtls_ecp_mul(&keypair.grp, &keypair.Q, &keypair.d, &keypair.grp.G, nullptr, nullptr), 0);
+
+    CF_ASSERT(
+            mbedtls_ecdsa_verify(&keypair.grp, op.cleartext.GetPtr(), op.cleartext.GetSize(), &keypair.Q, &sig_r, &sig_s) == 0,
+            "Cannot verify generated signature");
+
+    {
+        std::optional<std::string> sig_r_str, sig_s_str, pub_x_str, pub_y_str;
+
+        CF_CHECK_NE(sig_r_str = mbedTLS_detail::MPIToString(&sig_r), std::nullopt);
+        CF_CHECK_NE(sig_s_str  = mbedTLS_detail::MPIToString(&sig_s), std::nullopt);
+        CF_CHECK_NE(pub_x_str = mbedTLS_detail::MPIToString(&keypair.Q.X), std::nullopt);
+        CF_CHECK_NE(pub_y_str = mbedTLS_detail::MPIToString(&keypair.Q.Y), std::nullopt);
+
+        ret = {{*sig_r_str, *sig_s_str}, {*pub_x_str, *pub_y_str}};
+    }
+
+end:
+    CF_NORET(mbedtls_ecp_keypair_free(&keypair));
+
+    mbedTLS_detail::UnsetGlobalDs();
+
+    CF_NORET(mbedtls_mpi_free(&sig_r));
+    CF_NORET(mbedtls_mpi_free(&sig_s));
+
+    return ret;
+}
 
 std::optional<bool> mbedTLS::OpECDSA_Verify(operation::ECDSA_Verify& op) {
+    if ( !op.digestType.Is(CF_DIGEST("SHA256")) &&
+         !op.digestType.Is(CF_DIGEST("NULL")) ) {
+        return std::nullopt;
+    }
+
     std::optional<bool> ret = std::nullopt;
-    (void)op;
-#if 0
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
     mbedTLS_detail::SetGlobalDs(&ds);
 
@@ -878,9 +950,9 @@ std::optional<bool> mbedTLS::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     mbedtls_mpi sig_r, sig_s;
     const mbedtls_ecp_curve_info* curve_info = nullptr;
 
-    /* noret */ mbedtls_ecdsa_init(&ctx);
-    /* noret */ mbedtls_mpi_init(&sig_r);
-    /* noret */ mbedtls_mpi_init(&sig_s);
+    CF_NORET(mbedtls_ecdsa_init(&ctx));
+    CF_NORET(mbedtls_mpi_init(&sig_r));
+    CF_NORET(mbedtls_mpi_init(&sig_s));
 
     {
         std::optional<uint16_t> tls_id;
@@ -896,13 +968,30 @@ std::optional<bool> mbedTLS::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     CF_CHECK_EQ(mbedtls_mpi_lset(&ctx.Q.Z, 1), 0);
 
     /* Signature */
-    CF_CHECK_EQ(mbedtls_mpi_read_string(&sig_s, 10, op.signature.signature.first.ToString(ds).c_str()), 0);
-    CF_CHECK_EQ(mbedtls_mpi_read_string(&sig_r, 10, op.signature.signature.second.ToString(ds).c_str()), 0);
+    CF_CHECK_EQ(mbedtls_mpi_read_string(&sig_r, 10, op.signature.signature.first.ToString(ds).c_str()), 0);
+    CF_CHECK_EQ(mbedtls_mpi_read_string(&sig_s, 10, op.signature.signature.second.ToString(ds).c_str()), 0);
 
     {
-        uint8_t CT[32];
-        CF_CHECK_EQ(mbedtls_sha256_ret(op.cleartext.GetPtr(), op.cleartext.GetSize(), CT, 0), 0);
-        const auto verifyRes = mbedtls_ecdsa_verify(&ctx.grp, CT, sizeof(CT), &ctx.Q, &sig_r, &sig_s);
+        int verifyRes;
+
+        switch ( op.digestType.Get() ) {
+            case    CF_DIGEST("SHA256"):
+                {
+                    uint8_t CT[32];
+                    CF_CHECK_EQ(mbedtls_sha256_ret(op.cleartext.GetPtr(), op.cleartext.GetSize(), CT, 0), 0);
+                    verifyRes = mbedtls_ecdsa_verify(&ctx.grp, CT, sizeof(CT), &ctx.Q, &sig_r, &sig_s);
+                }
+                break;
+            case    CF_DIGEST("NULL"):
+                {
+                    const auto CT = op.cleartext.ECDSA_RandomPad(ds, op.curveType);
+                    verifyRes = mbedtls_ecdsa_verify(&ctx.grp, CT.GetPtr(), CT.GetSize(), &ctx.Q, &sig_r, &sig_s);
+                }
+                break;
+            default:
+                CF_UNREACHABLE();
+        }
+
         if ( verifyRes == 0 ) {
             ret = true;
         } else if ( verifyRes == MBEDTLS_ERR_ECP_VERIFY_FAILED ) {
@@ -911,13 +1000,12 @@ std::optional<bool> mbedTLS::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     }
 
 end:
-    /* noret */ mbedtls_ecdsa_free(&ctx);
-    /* noret */ mbedtls_mpi_free(&sig_r);
-    /* noret */ mbedtls_mpi_free(&sig_s);
+    CF_NORET(mbedtls_ecdsa_free(&ctx));
+    CF_NORET(mbedtls_mpi_free(&sig_r));
+    CF_NORET(mbedtls_mpi_free(&sig_s));
 
     mbedTLS_detail::UnsetGlobalDs();
 
-#endif
     return ret;
 }
 

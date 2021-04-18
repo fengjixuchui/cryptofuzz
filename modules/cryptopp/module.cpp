@@ -2102,6 +2102,13 @@ end:
 }
 
 std::optional<component::Key> CryptoPP::OpKDF_PBKDF(operation::KDF_PBKDF& op) {
+    /* XXX PBKDF + SHAKE produces different result than OpenSSL */
+    if (
+            op.digestType.Is(CF_DIGEST("SHAKE128")) ||
+            op.digestType.Is(CF_DIGEST("SHAKE256")) ) {
+        return std::nullopt;
+    }
+
     return CryptoPP_detail::InvokeByDigest<CryptoPP_detail::KDF_PBKDF, component::Key>(op);
 }
 
@@ -2324,6 +2331,18 @@ std::optional<component::Bignum> CryptoPP::OpBignumCalc(operation::BignumCalc& o
             break;
         case    CF_CALCOP("IsEq(A,B)"):
             opRunner = std::make_unique<CryptoPP_bignum::IsEq>();
+            break;
+        case    CF_CALCOP("IsGt(A,B)"):
+            opRunner = std::make_unique<CryptoPP_bignum::IsGt>();
+            break;
+        case    CF_CALCOP("IsGte(A,B)"):
+            opRunner = std::make_unique<CryptoPP_bignum::IsGte>();
+            break;
+        case    CF_CALCOP("IsLt(A,B)"):
+            opRunner = std::make_unique<CryptoPP_bignum::IsLt>();
+            break;
+        case    CF_CALCOP("IsLte(A,B)"):
+            opRunner = std::make_unique<CryptoPP_bignum::IsLte>();
             break;
         case    CF_CALCOP("IsZero(A)"):
             opRunner = std::make_unique<CryptoPP_bignum::IsZero>();

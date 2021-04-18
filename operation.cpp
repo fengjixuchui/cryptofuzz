@@ -661,6 +661,37 @@ nlohmann::json ECIES_Encrypt::ToJSON(void) const {
     return j;
 }
 
+std::string ECIES_Decrypt::Name(void) const { return "ECIES_Decrypt"; }
+std::string ECIES_Decrypt::ToString(void) const {
+    std::stringstream ss;
+
+    ss << "operation name: ECIES_Decrypt" << std::endl;
+    ss << "ciphertext: " << util::HexDump(ciphertext.Get()) << std::endl;
+    ss << "ecc curve: " << repository::ECC_CurveToString(curveType.Get()) << std::endl;
+    ss << "private key: " << priv.ToString() << std::endl;
+    ss << "public key X: " << pub.first.ToString() << std::endl;
+    ss << "public key Y: " << pub.second.ToString() << std::endl;
+    ss << "cipher: " << repository::CipherToString(cipherType.Get()) << std::endl;
+    ss << "iv: " << (iv ? util::HexDump(iv->Get()) : "nullopt") << std::endl;
+
+    return ss.str();
+}
+
+nlohmann::json ECIES_Decrypt::ToJSON(void) const {
+    nlohmann::json j;
+    j["operation"] = "ECIES_Decrypt";
+    j["ciphertext"] = ciphertext.ToJSON();
+    j["curveType"] = curveType.ToJSON();
+    j["priv"] = priv.ToJSON();
+    j["pub_x"] = pub.first.ToJSON();
+    j["pub_y"] = pub.second.ToJSON();
+    j["cipherType"] = cipherType.ToJSON();
+    j["iv_enabled"] = (bool)(iv != std::nullopt);
+    j["iv"] = iv != std::nullopt ? iv->ToJSON() : "";
+    j["modifier"] = modifier.ToJSON();
+    return j;
+}
+
 std::string DH_GenerateKeyPair::Name(void) const { return "DH_GenerateKeyPair"; }
 std::string DH_GenerateKeyPair::ToString(void) const {
     std::stringstream ss;
@@ -845,6 +876,30 @@ nlohmann::json BLS_HashToG2::ToJSON(void) const {
     nlohmann::json j;
     j["curveType"] = curveType.ToJSON();
     j["cleartext"] = cleartext.ToJSON();
+    j["modifier"] = modifier.ToJSON();
+    return j;
+}
+
+std::string SR25519_Verify::Name(void) const { return "ECDSA_Verify"; }
+std::string SR25519_Verify::ToString(void) const {
+    std::stringstream ss;
+
+    ss << "operation name: SR25519_Verify" << std::endl;
+    ss << "public key: " << signature.pub.ToString() << std::endl;
+    ss << "cleartext: " << util::HexDump(cleartext.Get()) << std::endl;
+    ss << "signature R: " << signature.signature.first.ToString() << std::endl;
+    ss << "signature S: " << signature.signature.second.ToString() << std::endl;
+
+    return ss.str();
+}
+
+nlohmann::json SR25519_Verify::ToJSON(void) const {
+    nlohmann::json j;
+    j["operation"] = "SR25519_Verify";
+    j["pub"] = signature.pub.ToJSON();
+    j["cleartext"] = cleartext.ToJSON();
+    j["sig_r"] = signature.signature.first.ToJSON();
+    j["sig_s"] = signature.signature.second.ToJSON();
     j["modifier"] = modifier.ToJSON();
     return j;
 }

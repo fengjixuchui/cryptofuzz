@@ -1,7 +1,9 @@
+#include <cryptofuzz/crypto.h>
 #include <cryptofuzz/generic.h>
 #include <cryptofuzz/components.h>
 #include <cryptofuzz/util.h>
 #include <boost/multiprecision/cpp_int.hpp>
+#include <cryptofuzz/repository.h>
 #include "third_party/json/json.hpp"
 #include "config.h"
 
@@ -121,6 +123,104 @@ Datasource Buffer::AsDatasource(void) const {
     return Datasource(data.data(), data.size());
 }
 
+Buffer Buffer::ECDSA_Pad(const size_t retSize) const {
+    size_t bufSize = GetSize();
+
+    if ( bufSize > retSize ) {
+        bufSize = retSize;
+    }
+
+    std::vector<uint8_t> ret(retSize);
+
+    if ( retSize != 0 ) {
+        const size_t delta = retSize - bufSize;
+
+        if ( delta != 0 ) {
+            memset(ret.data(), 0, delta);
+        }
+
+        if ( bufSize != 0 ) {
+            memcpy(ret.data() + delta, GetPtr(), bufSize);
+        }
+    }
+
+    return Buffer(ret);
+}
+
+/* Randomly modify an ECDSA input in such a way that it remains equivalent
+ * to ECDSA verify/sign functions
+ */
+Buffer Buffer::ECDSA_RandomPad(Datasource& ds, const Type& curveType) const {
+    const auto numBits = cryptofuzz::repository::ECC_CurveToBits(curveType.Get());
+    if ( numBits == std::nullopt ) {
+        /* The size of this curve is not known, so return the original buffer */
+        return Buffer(data);
+    }
+
+    if ( *numBits % 8 != 0 ) {
+        /* Curve sizes which are not a byte multiple are currently not supported,
+         * so return the original buffer
+         */
+        return Buffer(data);
+    }
+
+    const size_t numBytes = (*numBits + 7) / 8;
+
+    std::vector<uint8_t> stripped;
+    {
+        size_t startPos;
+        const size_t endPos = GetSize() > numBytes ? numBytes : GetSize();
+
+        for (startPos = 0; startPos < endPos; startPos++) {
+            if ( data[startPos] != 0 ) {
+                break;
+            }
+        }
+        const auto& ref = GetConstVectorPtr();
+
+        stripped.insert(std::end(stripped), std::begin(ref) + startPos, std::begin(ref) + endPos);
+    }
+
+    /* Decide how many bytes to insert */
+    uint16_t numInserts = 0;
+    try {
+        numInserts = ds.Get<uint16_t>();
+    } catch ( fuzzing::datasource::Datasource::OutOfData ) { }
+
+    std::vector<uint8_t> ret;
+
+    /* Left-pad the input until it is the curve size */
+    {
+        if ( stripped.size() < numBytes ) {
+            const size_t needed = numBytes - stripped.size();
+            const std::vector<uint8_t> zeroes(numInserts > needed ? needed : numInserts, 0);
+            ret.insert(std::end(ret), std::begin(zeroes), std::end(zeroes));
+            numInserts -= zeroes.size();
+        }
+    }
+
+    /* Insert the input */
+    ret.insert(std::end(ret), std::begin(stripped), std::end(stripped));
+
+    /* Right-pad the input with random bytes (if available) or zeroes */
+    if ( numInserts > 0 ) {
+        std::vector<uint8_t> toInsert;
+        try {
+            toInsert = ds.GetData(0, numInserts, numInserts);
+        } catch ( fuzzing::datasource::Datasource::OutOfData ) {
+            toInsert = std::vector<uint8_t>(numInserts, 0);
+        }
+        ret.insert(std::end(ret), std::begin(toInsert), std::end(toInsert));
+    }
+
+    return Buffer(ret);
+}
+
+Buffer Buffer::SHA256(void) const {
+    const auto hash = crypto::sha256(Get());
+    return Buffer(hash);
+}
+
 /* Bignum */
 
 Bignum::Bignum(Datasource& ds) :
@@ -169,7 +269,8 @@ bool Bignum::IsLessThan(const std::string& other) const {
 }
 
 std::string Bignum::ToString(void) const {
-    return std::string(data.GetPtr(), data.GetPtr() + data.GetSize());
+    const auto ptr = data.GetPtr();
+    return std::string(ptr, ptr + data.GetSize());
 }
 
 std::string Bignum::ToTrimmedString(void) const {
@@ -396,6 +497,37 @@ nlohmann::json G2::ToJSON(void) const {
         first.first.ToJSON(), first.second.ToJSON(),
         second.first.ToJSON(), second.second.ToJSON()
     };
+}
+
+/* SR25519_Signature */
+SR25519_Signature::SR25519_Signature(Datasource& ds) :
+    signature(ds),
+    pub(ds)
+{ }
+
+SR25519_Signature::SR25519_Signature(BignumPair signature, Bignum pub) :
+    signature(signature),
+    pub(pub)
+{ }
+
+SR25519_Signature::SR25519_Signature(nlohmann::json json) :
+    signature(json["signature"]),
+    pub(json["pub"])
+{ }
+
+bool SR25519_Signature::operator==(const SR25519_Signature& rhs) const {
+    return
+        (signature == rhs.signature) &&
+        (pub == rhs.pub);
+}
+
+void SR25519_Signature::Serialize(Datasource& ds) const {
+    signature.Serialize(ds);
+    pub.Serialize(ds);
+}
+
+nlohmann::json SR25519_Signature::ToJSON(void) const {
+    return std::vector<nlohmann::json>{signature.ToJSON(), pub.ToJSON()};
 }
 
 } /* namespace component */

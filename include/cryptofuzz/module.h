@@ -120,6 +120,10 @@ class Module {
             (void)op;
             return std::nullopt;
         }
+        virtual std::optional<component::Cleartext> OpECIES_Decrypt(operation::ECIES_Decrypt& op) {
+            (void)op;
+            return std::nullopt;
+        }
         virtual std::optional<component::DH_KeyPair> OpDH_GenerateKeyPair(operation::DH_GenerateKeyPair& op) {
             (void)op;
             return std::nullopt;
@@ -153,6 +157,10 @@ class Module {
             return std::nullopt;
         }
         virtual std::optional<component::G2> OpBLS_HashToG2(operation::BLS_HashToG2& op) {
+            (void)op;
+            return std::nullopt;
+        }
+        virtual std::optional<bool> OpSR25519_Verify(operation::SR25519_Verify& op) {
             (void)op;
             return std::nullopt;
         }

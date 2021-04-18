@@ -91,6 +91,150 @@ namespace relic_detail {
     }
 }
 
+std::optional<component::Digest> relic::OpDigest(operation::Digest& op) {
+    std::optional<component::Digest> ret = std::nullopt;
+    switch ( op.digestType.Get() ) {
+        case    CF_DIGEST("SHA224"):
+            {
+                uint8_t out[28];
+                CF_NORET(md_map_sh224(out, op.cleartext.GetPtr(), op.cleartext.GetSize()));
+                ret = component::Digest(out, 28);
+            }
+            break;
+        case    CF_DIGEST("SHA256"):
+            {
+                uint8_t out[32];
+                CF_NORET(md_map_sh256(out, op.cleartext.GetPtr(), op.cleartext.GetSize()));
+                ret = component::Digest(out, 32);
+            }
+            break;
+        case    CF_DIGEST("SHA384"):
+            {
+                uint8_t out[48];
+                CF_NORET(md_map_sh384(out, op.cleartext.GetPtr(), op.cleartext.GetSize()));
+                ret = component::Digest(out, 48);
+            }
+            break;
+        case    CF_DIGEST("SHA512"):
+            {
+                uint8_t out[64];
+                CF_NORET(md_map_sh512(out, op.cleartext.GetPtr(), op.cleartext.GetSize()));
+                ret = component::Digest(out, 64);
+            }
+            break;
+        case    CF_DIGEST("BLAKE2S160"):
+            {
+                uint8_t out[20];
+                CF_NORET(md_map_b2s160(out, op.cleartext.GetPtr(), op.cleartext.GetSize()));
+                ret = component::Digest(out, 20);
+            }
+            break;
+        case    CF_DIGEST("BLAKE2S256"):
+            {
+                uint8_t out[32];
+                CF_NORET(md_map_b2s256(out, op.cleartext.GetPtr(), op.cleartext.GetSize()));
+                ret = component::Digest(out, 32);
+            }
+            break;
+    }
+
+    return ret;
+}
+
+std::optional<component::MAC> relic::OpHMAC(operation::HMAC& op) {
+    std::optional<component::MAC> ret = std::nullopt;
+#if MD_MAP == SH256
+    if ( op.digestType.Is(CF_DIGEST("SHA256")) ) {
+        uint8_t mac[RLC_MD_LEN];
+        CF_NORET(md_hmac(mac, op.cleartext.GetPtr(), op.cleartext.GetSize(), op.cipher.key.GetPtr(), op.cipher.key.GetSize()));
+        ret = component::MAC(mac, sizeof(mac));
+    }
+#else
+    (void)op;
+#endif
+    return ret;
+}
+
+std::optional<component::Ciphertext> relic::OpSymmetricEncrypt(operation::SymmetricEncrypt& op) {
+    std::optional<component::Ciphertext> ret = std::nullopt;
+
+    uint8_t* out = nullptr;
+
+    switch ( op.cipher.cipherType.Get() ) {
+        case CF_CIPHER("AES_128_CBC"):
+        case CF_CIPHER("AES_192_CBC"):
+        case CF_CIPHER("AES_256_CBC"):
+            {
+                CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+                int outSize = static_cast<int>(op.ciphertextSize);
+                out = util::malloc(op.ciphertextSize);
+                CF_CHECK_EQ(
+                        bc_aes_cbc_enc(
+                            out, &outSize,
+                            (uint8_t*)op.cleartext.GetPtr(), op.cleartext.GetSize(),
+                            (uint8_t*)op.cipher.key.GetPtr(), op.cipher.key.GetSize(),
+                            (uint8_t*)op.cipher.iv.GetPtr()), RLC_OK);
+                ret = component::Ciphertext(Buffer(out, outSize));
+            }
+            break;
+    }
+
+end:
+    util::free(out);
+
+    return ret;
+}
+
+std::optional<component::Cleartext> relic::OpSymmetricDecrypt(operation::SymmetricDecrypt& op) {
+    std::optional<component::Cleartext> ret = std::nullopt;
+
+    uint8_t* out = nullptr;
+
+    switch ( op.cipher.cipherType.Get() ) {
+        case CF_CIPHER("AES_128_CBC"):
+        case CF_CIPHER("AES_192_CBC"):
+        case CF_CIPHER("AES_256_CBC"):
+            {
+                CF_CHECK_EQ(op.cipher.iv.GetSize(), 16);
+                int outSize = static_cast<int>(op.cleartextSize);
+                out = util::malloc(op.cleartextSize);
+                CF_CHECK_EQ(
+                        bc_aes_cbc_dec(
+                            out, &outSize,
+                            (uint8_t*)op.ciphertext.GetPtr(), op.ciphertext.GetSize(),
+                            (uint8_t*)op.cipher.key.GetPtr(), op.cipher.key.GetSize(),
+                            (uint8_t*)op.cipher.iv.GetPtr()), RLC_OK);
+                ret = component::Cleartext(Buffer(out, outSize));
+            }
+            break;
+    }
+
+end:
+    util::free(out);
+
+    return ret;
+}
+
+std::optional<component::Key> relic::OpKDF_X963(operation::KDF_X963& op) {
+    std::optional<component::Key> ret = std::nullopt;
+#if MD_MAP == SH256
+    uint8_t* key = nullptr;
+
+    if ( op.digestType.Is(CF_DIGEST("SHA256")) ) {
+        if ( op.info.GetSize() == 0 ) {
+            key = util::malloc(op.keySize);
+            CF_NORET(md_kdf(key, op.keySize, op.secret.GetPtr(), op.secret.GetSize()));
+            ret = component::Key(key, op.keySize);
+        }
+    }
+
+    util::free(key);
+#else
+    (void)op;
+#endif
+    return ret;
+}
+
 std::optional<component::ECC_PublicKey> relic::OpECC_PrivateToPublic(operation::ECC_PrivateToPublic& op) {
     std::optional<component::ECC_PublicKey> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
@@ -155,7 +299,7 @@ std::optional<bool> relic::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     std::optional<bool> ret = std::nullopt;
     Datasource ds(op.modifier.GetPtr(), op.modifier.GetSize());
 
-    if ( op.digestType.Get() != CF_DIGEST("NULL") ) {
+    if ( !op.digestType.Is({CF_DIGEST("NULL"), CF_DIGEST("SHA256")}) ) {
         return ret;
     }
 
@@ -175,12 +319,6 @@ std::optional<bool> relic::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     {
         /* noret */ ec_new(pub);
         pub_initialized = true;
-#if 0
-        /* noret */ ec_set_infty(pub);
-        const int size = ec_size_bin(pub, 0);
-        CF_ASSERT(size > 1, "Pubkey has invalid size");
-        CF_ASSERT((size % 2) == 1, "Pubkey has invalid size");
-#endif
         const int size = 65;
         const auto halfSize = (size-1) / 2;
 
@@ -196,9 +334,55 @@ std::optional<bool> relic::OpECDSA_Verify(operation::ECDSA_Verify& op) {
     }
 
     {
-        auto CT = op.cleartext.Get();
-        ret = cp_ecdsa_ver(r.Get(), s.Get(), CT.data(), CT.size(), 1, pub) == 1;
+        Buffer CT = op.cleartext;
+
+        if ( op.digestType.Is(CF_DIGEST("SHA256")) ) {
+            CT = CT.SHA256();
+        }
+
+        CT = CT.ECDSA_RandomPad(ds, op.curveType);
+
+        auto CTref = CT.GetVectorPtr();
+
+        ret = cp_ecdsa_ver(r.Get(), s.Get(), CTref.data(), CTref.size(), 1, pub) == 1;
     }
+
+end:
+    if ( pub_initialized ) {
+        ec_free(pub);
+    }
+    return ret;
+}
+
+std::optional<bool> relic::OpECC_ValidatePubkey(operation::ECC_ValidatePubkey& op) {
+    std::optional<bool> ret = std::nullopt;
+
+    ec_t pub;
+    bool pub_initialized = false;
+    std::vector<uint8_t> pub_bytes;
+
+    /* Set curve */
+    CF_CHECK_TRUE(relic_detail::SetCurve(op.curveType));
+
+    /* Set pubkey */
+    {
+        /* noret */ ec_new(pub);
+        pub_initialized = true;
+        const int size = 65;
+        const auto halfSize = (size-1) / 2;
+
+        std::optional<std::vector<uint8_t>> pub_x, pub_y;
+        CF_CHECK_NE(pub_x = util::DecToBin(op.pub.first.ToTrimmedString(), halfSize), std::nullopt);
+        CF_CHECK_NE(pub_y = util::DecToBin(op.pub.second.ToTrimmedString(), halfSize), std::nullopt);
+
+        pub_bytes.push_back(0x04);
+        pub_bytes.insert(std::end(pub_bytes), std::begin(*pub_x), std::end(*pub_x));
+        pub_bytes.insert(std::end(pub_bytes), std::begin(*pub_y), std::end(*pub_y));
+
+        /* noret */ ec_read_bin(pub, pub_bytes.data(), size);
+    }
+
+    ret = ec_on_curve(pub);
 
 end:
     if ( pub_initialized ) {
@@ -214,7 +398,7 @@ std::optional<component::ECDSA_Signature> relic::OpECDSA_Sign(operation::ECDSA_S
     if ( op.UseRandomNonce() == false ) {
         return ret;
     }
-    if ( op.digestType.Get() != CF_DIGEST("NULL") ) {
+    if ( !op.digestType.Is({CF_DIGEST("NULL"), CF_DIGEST("SHA256")}) ) {
         return ret;
     }
 
@@ -233,10 +417,20 @@ std::optional<component::ECDSA_Signature> relic::OpECDSA_Sign(operation::ECDSA_S
     CF_CHECK_TRUE(priv.Set(op.priv.ToString()));
     CF_CHECK_EQ(bn_is_zero(priv.Get()), 0);
 
+
+
     {
-        auto CT = op.cleartext.Get();
-        //CF_CHECK_EQ(cp_ecdsa_sig(r.Get(), s.Get(), op.cleartext.GetPtr(), op.cleartext.GetSize(), 0, priv.Get()), 0);
-        CF_CHECK_EQ(cp_ecdsa_sig(r.Get(), s.Get(), CT.data(), CT.size(), 0, priv.Get()), 0);
+        Buffer CT = op.cleartext;
+
+        if ( op.digestType.Is(CF_DIGEST("SHA256")) ) {
+            CT = CT.SHA256();
+        }
+
+        CT = op.cleartext.ECDSA_RandomPad(ds, op.curveType);
+
+        auto CTref = CT.GetVectorPtr();
+
+        CF_CHECK_EQ(cp_ecdsa_sig(r.Get(), s.Get(), CTref.data(), CTref.size(), 1, priv.Get()), 0);
     }
 
     CF_CHECK_NE(R = r.ToString(), std::nullopt);
@@ -251,6 +445,12 @@ std::optional<component::ECDSA_Signature> relic::OpECDSA_Sign(operation::ECDSA_S
         goto end;
     }
     CF_CHECK_NE(ec_is_infty(pub), 1);
+
+    {
+        auto ct = op.cleartext.Get();
+
+        CF_ASSERT(cp_ecdsa_ver(r.Get(), s.Get(), ct.data(), ct.size(), 1, pub) == 1, "Cannot verify generated signature");
+    }
 
     {
         const int size = ec_size_bin(pub, 0);

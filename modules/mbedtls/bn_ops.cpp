@@ -21,6 +21,13 @@ bool Add::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
                 CF_CHECK_EQ(mbedtls_mpi_add_int(res.GetDestPtr(), bn[0].GetPtr(), *bn1), 0);
             }
             return true;
+        case    2:
+            {
+                CF_CHECK_NE(mbedtls_mpi_cmp_int(bn[0].GetPtr(), 0), -1);
+                CF_CHECK_NE(mbedtls_mpi_cmp_int(bn[1].GetPtr(), 0), -1);
+                CF_CHECK_EQ(mbedtls_mpi_add_abs(res.GetDestPtr(), bn[0].GetPtr(), bn[1].GetPtr()), 0);
+            }
+            return true;
     }
 
 end:
@@ -129,11 +136,17 @@ bool InvMod::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
     (void)ds;
     bool ret = false;
 
-    CF_CHECK_EQ(mbedtls_mpi_inv_mod(res.GetDestPtr(), bn[0].GetPtr(), bn[1].GetPtr()), 0);
+    {
+        const auto r = mbedtls_mpi_inv_mod(res.GetDestPtr(), bn[0].GetPtr(), bn[1].GetPtr());
+        if ( r == 0 ) {
+            ret = true;
+        } else if ( r == MBEDTLS_ERR_MPI_NOT_ACCEPTABLE ) {
+            /* Modular inverse does not exist */
+            res.Set("0");
+            ret = true;
+        }
+    }
 
-    ret = true;
-
-end:
     return ret;
 }
 
@@ -374,7 +387,7 @@ end:
 bool Set::Run(Datasource& ds, Bignum& res, BignumCluster& bn) const {
     switch ( ds.Get<uint8_t>() ) {
         case    0:
-            /* noret */ mbedtls_mpi_swap(res.GetDestPtr(), bn[0].GetDestPtr());
+            CF_NORET(mbedtls_mpi_swap(res.GetDestPtr(), bn[0].GetDestPtr()));
             return true;
         case    1:
             CF_CHECK_EQ(mbedtls_mpi_safe_cond_assign(res.GetDestPtr(), bn[0].GetPtr(), 1), 0);

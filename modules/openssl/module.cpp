@@ -19,8 +19,10 @@ extern "C" { void x25519_public_from_private(uint8_t out_public_value[32], const
 #define X25519_public_from_private x25519_public_from_private
 #else
 /* OpenSSL */
-extern "C" { void X25519_public_from_private(uint8_t out_public_value[32], const uint8_t private_key[32]); }
-extern "C" { void X448_public_from_private(uint8_t out_public_value[56], const uint8_t private_key[56]); }
+extern "C" { void ossl_x25519_public_from_private(uint8_t out_public_value[32], const uint8_t private_key[32]); }
+extern "C" { void ossl_x448_public_from_private(uint8_t out_public_value[56], const uint8_t private_key[56]); }
+#define X25519_public_from_private ossl_x25519_public_from_private
+#define X448_public_from_private ossl_x448_public_from_private
 #endif
 
 #include "module_internal.h"
@@ -1226,11 +1228,8 @@ const EVP_AEAD* OpenSSL::toEVPAEAD(const component::SymmetricCipherType cipherTy
         { CF_CIPHER("AES_128_CCM_BLUETOOTH_8"), EVP_aead_aes_128_ccm_bluetooth_8() },
         { CF_CIPHER("AES_128_CBC_SHA1_TLS"), EVP_aead_aes_128_cbc_sha1_tls() },
         { CF_CIPHER("AES_128_CBC_SHA1_TLS_IMPLICIT_IV"), EVP_aead_aes_128_cbc_sha1_tls_implicit_iv() },
-        { CF_CIPHER("AES_128_CBC_SHA256_TLS"), EVP_aead_aes_128_cbc_sha256_tls() },
         { CF_CIPHER("AES_256_CBC_SHA1_TLS"), EVP_aead_aes_256_cbc_sha1_tls() },
         { CF_CIPHER("AES_256_CBC_SHA1_TLS_IMPLICIT_IV"), EVP_aead_aes_256_cbc_sha1_tls_implicit_iv() },
-        { CF_CIPHER("AES_256_CBC_SHA256_TLS"), EVP_aead_aes_256_cbc_sha256_tls() },
-        { CF_CIPHER("AES_256_CBC_SHA384_TLS"), EVP_aead_aes_256_cbc_sha384_tls() },
         { CF_CIPHER("DES_EDE3_CBC_SHA1_TLS"), EVP_aead_des_ede3_cbc_sha1_tls() },
         { CF_CIPHER("DES_EDE3_CBC_SHA1_TLS_IMPLICIT_IV"), EVP_aead_des_ede3_cbc_sha1_tls_implicit_iv() },
         { CF_CIPHER("NULL_SHA1_TLS"), EVP_aead_null_sha1_tls() },
@@ -1404,19 +1403,14 @@ namespace OpenSSL_detail {
             parts = util::ToParts(ds, op.cleartext);
             siphash = EVP_MAC_fetch(nullptr, "SIPHASH", nullptr);
             ctx = EVP_MAC_CTX_new(siphash);
-            CF_CHECK_EQ(EVP_MAC_init(ctx), 1);
-
-            auto keyCopy = op.cipher.key.Get();
-            *p++ = OSSL_PARAM_construct_octet_string(
-                    OSSL_MAC_PARAM_KEY,
-                    keyCopy.data(),
-                    keyCopy.size());
 
             unsigned int macSize_ui = macSize;
             *p++ = OSSL_PARAM_construct_uint(OSSL_MAC_PARAM_SIZE, &macSize_ui);
 
             *p = OSSL_PARAM_construct_end();
-            CF_CHECK_EQ(EVP_MAC_CTX_set_params(ctx, params), 1);
+
+            CF_CHECK_EQ(EVP_MAC_init(ctx, op.cipher.key.GetPtr(), op.cipher.key.GetSize(), params), 1);
+
             out = util::malloc(macSize);
         }
 
@@ -2388,7 +2382,6 @@ std::optional<component::Key> OpenSSL::OpKDF_SCRYPT_EVP_KDF(operation::KDF_SCRYP
     OSSL_PARAM params[7], *p = params;
     uint8_t* out = util::malloc(op.keySize);
 
-    /* Initialize */
     {
 
         auto passwordCopy = op.password.Get();
@@ -2425,12 +2418,7 @@ std::optional<component::Key> OpenSSL::OpKDF_SCRYPT_EVP_KDF(operation::KDF_SCRYP
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
-    }
-
-    /* Process */
-    {
-        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize), 0);
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize, params), 0);
     }
 
     /* Finalize */
@@ -2606,6 +2594,67 @@ end:
 }
 #endif
 
+#if !defined(CRYPTOFUZZ_LIBRESSL) && !defined(CRYPTOFUZZ_BORINGSSL) && !defined(CRYPTOFUZZ_OPENSSL_102) && !defined(CRYPTOFUZZ_OPENSSL_111) && !defined(CRYPTOFUZZ_OPENSSL_110)
+std::optional<component::Key> OpenSSL::OpKDF_PBKDF(operation::KDF_PBKDF& op) {
+    std::optional<component::Key> ret = std::nullopt;
+    EVP_KDF_CTX* kctx = nullptr;
+    const EVP_MD* md = nullptr;
+    OSSL_PARAM params[7], *p = params;
+    uint8_t* out = util::malloc(op.keySize);
+
+    {
+        CF_CHECK_NE(md = toEVPMD(op.digestType), nullptr);
+
+        auto passwordCopy = op.password.Get();
+        *p++ = OSSL_PARAM_construct_octet_string(
+                OSSL_KDF_PARAM_PASSWORD,
+                passwordCopy.data(),
+                passwordCopy.size());
+
+        auto saltCopy = op.salt.Get();
+        *p++ = OSSL_PARAM_construct_octet_string(
+                OSSL_KDF_PARAM_SALT,
+                saltCopy.data(),
+                saltCopy.size());
+
+        unsigned int iterations = op.iterations;
+        *p++ = OSSL_PARAM_construct_uint(OSSL_KDF_PARAM_ITER, &iterations);
+
+        unsigned int id = 1;
+        *p++ = OSSL_PARAM_construct_uint(OSSL_KDF_PARAM_PKCS12_ID, &id);
+
+        std::string mdName(EVP_MD_name(md));
+        *p++ = OSSL_PARAM_construct_utf8_string(OSSL_KDF_PARAM_DIGEST, mdName.data(), mdName.size() + 1);
+
+        int pkcs5 = 0;
+        *p++ = OSSL_PARAM_construct_int(OSSL_KDF_PARAM_PKCS5, &pkcs5);
+
+        *p = OSSL_PARAM_construct_end();
+
+        {
+            EVP_KDF* kdf = EVP_KDF_fetch(nullptr, "PKCS12KDF", nullptr);
+            CF_CHECK_NE(kdf, nullptr);
+            kctx = EVP_KDF_CTX_new(kdf);
+            EVP_KDF_free(kdf);
+            CF_CHECK_NE(kctx, nullptr);
+        }
+
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize, params), 0);
+    }
+
+    /* Finalize */
+    {
+        ret = component::Key(out, op.keySize);
+    }
+end:
+    EVP_KDF_CTX_free(kctx);
+
+    util::free(out);
+
+    return ret;
+}
+#endif
+
 #if !defined(CRYPTOFUZZ_LIBRESSL) && !defined(CRYPTOFUZZ_OPENSSL_102) && !defined(CRYPTOFUZZ_OPENSSL_111) && !defined(CRYPTOFUZZ_OPENSSL_110)
 std::optional<component::Key> OpenSSL::OpKDF_PBKDF2(operation::KDF_PBKDF2& op) {
  #if defined(CRYPTOFUZZ_BORINGSSL)
@@ -2638,7 +2687,6 @@ end:
     OSSL_PARAM params[6], *p = params;
     uint8_t* out = util::malloc(op.keySize);
 
-    /* Initialize */
     {
         CF_CHECK_NE(md = toEVPMD(op.digestType), nullptr);
 
@@ -2673,12 +2721,7 @@ end:
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
-    }
-
-    /* Process */
-    {
-        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize), 0);
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize, params), 0);
     }
 
     /* Finalize */
@@ -2779,7 +2822,6 @@ std::optional<component::Key> OpenSSL::OpKDF_SSH(operation::KDF_SSH& op) {
     OSSL_PARAM params[6], *p = params;
     uint8_t* out = util::malloc(op.keySize);
 
-    /* Initialize */
     {
         CF_CHECK_NE(md = toEVPMD(op.digestType), nullptr);
         CF_CHECK_EQ(op.type.GetSize(), 1);
@@ -2827,12 +2869,7 @@ std::optional<component::Key> OpenSSL::OpKDF_SSH(operation::KDF_SSH& op) {
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
-    }
-
-    /* Process */
-    {
-        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize), 0);
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize, params), 0);
     }
 
     /* Finalize */
@@ -2855,7 +2892,6 @@ std::optional<component::Key> OpenSSL::OpKDF_X963(operation::KDF_X963& op) {
     OSSL_PARAM params[4], *p = params;
     uint8_t* out = util::malloc(op.keySize);
 
-    /* Initialize */
     {
         CF_CHECK_NE(md = toEVPMD(op.digestType), nullptr);
 
@@ -2884,12 +2920,7 @@ std::optional<component::Key> OpenSSL::OpKDF_X963(operation::KDF_X963& op) {
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
-    }
-
-    /* Process */
-    {
-        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize), 0);
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize, params), 0);
     }
 
     /* Finalize */
@@ -2916,7 +2947,6 @@ std::optional<component::Key> OpenSSL::OpKDF_SP_800_108(operation::KDF_SP_800_10
     std::string counterStr = "COUNTER";
     std::string feedbackStr = "FEEDBACK";
 
-    /* Initialize */
     {
         if ( op.mode != 0 && op.mode != 1 ) {
             goto end;
@@ -2973,12 +3003,7 @@ std::optional<component::Key> OpenSSL::OpKDF_SP_800_108(operation::KDF_SP_800_10
             CF_CHECK_NE(kctx, nullptr);
         }
 
-        CF_CHECK_EQ(EVP_KDF_CTX_set_params(kctx, params), 1);
-    }
-
-    /* Process */
-    {
-        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize), 0);
+        CF_CHECK_GT(EVP_KDF_derive(kctx, out, op.keySize, params), 0);
     }
 
     /* Finalize */
@@ -3576,16 +3601,18 @@ std::optional<component::ECDSA_Signature> OpenSSL::OpECDSA_Sign(operation::ECDSA
         CF_CHECK_NE(pub_x_str = BN_bn2dec(pub_x.GetPtr()), nullptr);
         CF_CHECK_NE(pub_y_str = BN_bn2dec(pub_y.GetPtr()), nullptr);
 
+        const auto CT = op.cleartext.ECDSA_RandomPad(ds, op.curveType);
+
 #if defined(CRYPTOFUZZ_BORINGSSL)
         if ( op.UseSpecifiedNonce() ) {
             std::optional<std::vector<uint8_t>> nonce_bytes;
             CF_CHECK_NE(nonce_bytes = util::DecToBin(op.nonce.ToTrimmedString()), std::nullopt);
 
-            CF_CHECK_NE(signature = ECDSA_sign_with_nonce_and_leak_private_key_for_testing(op.cleartext.GetPtr(), op.cleartext.GetSize(), key.GetPtr(), nonce_bytes->data(), nonce_bytes->size()), nullptr);
+            CF_CHECK_NE(signature = ECDSA_sign_with_nonce_and_leak_private_key_for_testing(CT.GetPtr(), CT.GetSize(), key.GetPtr(), nonce_bytes->data(), nonce_bytes->size()), nullptr);
         }
         else
 #endif
-        CF_CHECK_NE(signature = ECDSA_do_sign(op.cleartext.GetPtr(), op.cleartext.GetSize(), key.GetPtr()), nullptr);
+        CF_CHECK_NE(signature = ECDSA_do_sign(CT.GetPtr(), CT.GetSize(), key.GetPtr()), nullptr);
 
 #if defined(CRYPTOFUZZ_LIBRESSL)
         /* noret */ ECDSA_SIG_get0(signature, &R, &S);
@@ -3679,7 +3706,8 @@ std::optional<bool> OpenSSL::OpECDSA_Verify(operation::ECDSA_Verify& op) {
         {
             int res;
             if ( op.digestType.Get() == CF_DIGEST("NULL") ) {
-                res = ECDSA_do_verify(op.cleartext.GetPtr(), op.cleartext.GetSize(), signature, key.GetPtr());
+                const auto CT = op.cleartext.ECDSA_RandomPad(ds, op.curveType);
+                res = ECDSA_do_verify(CT.GetPtr(), CT.GetSize(), signature, key.GetPtr());
             } else if ( op.digestType.Get() == CF_DIGEST("SHA256") ) {
                 uint8_t CT[32];
                 SHA256(op.cleartext.GetPtr(), op.cleartext.GetSize(), CT);

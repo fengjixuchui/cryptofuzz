@@ -74,6 +74,10 @@
   #include <modules/golang/module.h>
 #endif
 
+#if defined(CRYPTOFUZZ_RING)
+  #include <modules/ring/module.h>
+#endif
+
 #if defined(CRYPTOFUZZ_NSS)
   #include <modules/nss/module.h>
 #endif
@@ -178,6 +182,14 @@
   #include <modules/chia_bls/module.h>
 #endif
 
+#if defined(CRYPTOFUZZ_K256)
+  #include <modules/k256/module.h>
+#endif
+
+#if defined(CRYPTOFUZZ_SCHNORRKEL)
+  #include <modules/schnorrkel/module.h>
+#endif
+
 std::shared_ptr<cryptofuzz::Driver> driver = nullptr;
 
 const cryptofuzz::Options* cryptofuzz_options = nullptr;
@@ -272,6 +284,10 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 #if defined(CRYPTOFUZZ_GOLANG)
     driver->LoadModule( std::make_shared<cryptofuzz::module::Golang>() );
+#endif
+
+#if defined(CRYPTOFUZZ_RING)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::Ring>() );
 #endif
 
 #if defined(CRYPTOFUZZ_NSS)
@@ -376,6 +392,14 @@ extern "C" int LLVMFuzzerInitialize(int *argc, char ***argv) {
 
 #if defined(CRYPTOFUZZ_CHIA_BLS)
     driver->LoadModule( std::make_shared<cryptofuzz::module::chia_bls>() );
+#endif
+
+#if defined(CRYPTOFUZZ_K256)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::k256>() );
+#endif
+
+#if defined(CRYPTOFUZZ_SCHNORRKEL)
+    driver->LoadModule( std::make_shared<cryptofuzz::module::schnorrkel>() );
 #endif
 
     /* TODO check if options.forceModule (if set) refers to a module that is

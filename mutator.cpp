@@ -509,9 +509,14 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t* data, size_t size, size_t max
                 }
                 break;
             case    CF_OPERATION("ECIES_Encrypt"):
+            case    CF_OPERATION("ECIES_Decrypt"):
                 {
                     parameters["modifier"] = getBuffer(PRNG() % 128);
-                    parameters["cleartext"] = getBuffer(PRNG() % 1024);
+                    if ( operation == CF_OPERATION("ECIES_Encrypt") ) {
+                        parameters["cleartext"] = getBuffer(PRNG() % 1024);
+                    } else {
+                        parameters["ciphertext"] = getBuffer(PRNG() % 1024);
+                    }
                     //parameters["cipherType"] = getRandomCipher();
                     parameters["cipherType"] = CF_CIPHER("AES_128_CBC");
                     parameters["iv_enabled"] = false;
@@ -537,8 +542,13 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t* data, size_t size, size_t max
                         parameters["pub_y"] = getBignum();
                     }
 
-                    cryptofuzz::operation::ECIES_Encrypt op(parameters);
-                    op.Serialize(dsOut2);
+                    if ( operation == CF_OPERATION("ECIES_Encrypt") ) {
+                        cryptofuzz::operation::ECIES_Encrypt op(parameters);
+                        op.Serialize(dsOut2);
+                    } else {
+                        cryptofuzz::operation::ECIES_Decrypt op(parameters);
+                        op.Serialize(dsOut2);
+                    }
                 }
                 break;
             case    CF_OPERATION("KDF_SCRYPT"):
@@ -794,6 +804,21 @@ extern "C" size_t LLVMFuzzerCustomMutator(uint8_t* data, size_t size, size_t max
                     }
 
                     cryptofuzz::operation::DH_Derive op(parameters);
+                    op.Serialize(dsOut2);
+                }
+                break;
+            case    CF_OPERATION("SR25519_Verify"):
+                {
+                    parameters["modifier"] = getBuffer(PRNG() % 1024);
+
+                    parameters["signature"]["pub"] = getBignum();
+
+                    parameters["signature"]["signature"][0] = getBignum();
+                    parameters["signature"]["signature"][1] = getBignum();
+
+                    parameters["cleartext"] = cryptofuzz::util::DecToHex(getBignum(true), (PRNG() % 64) * 2);
+
+                    cryptofuzz::operation::SR25519_Verify op(parameters);
                     op.Serialize(dsOut2);
                 }
                 break;

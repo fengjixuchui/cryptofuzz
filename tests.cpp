@@ -300,7 +300,7 @@ static void test_ECDSA_Signature(const uint64_t curveID, const std::string R, co
         ::abort();
     }
     if ( s < 1 ) {
-        std::cout << "ECDSA signature invalid: R < 1" << std::endl;
+        std::cout << "ECDSA signature invalid: S < 1" << std::endl;
         ::abort();
     }
 }
@@ -343,6 +343,11 @@ void test(const operation::ECIES_Encrypt& op, const std::optional<component::Cip
     (void)result;
 }
 
+void test(const operation::ECIES_Decrypt& op, const std::optional<component::Cleartext>& result) {
+    (void)op;
+    (void)result;
+}
+
 void test(const operation::DH_GenerateKeyPair& op, const std::optional<component::DH_KeyPair>& result) {
     (void)op;
     (void)result;
@@ -379,6 +384,11 @@ void test(const operation::BLS_HashToG1& op, const std::optional<component::G1>&
 }
 
 void test(const operation::BLS_HashToG2& op, const std::optional<component::G2>& result) {
+    (void)op;
+    (void)result;
+}
+
+void test(const operation::SR25519_Verify& op, const std::optional<bool>& result) {
     (void)op;
     (void)result;
 }
@@ -501,6 +511,18 @@ void test(const operation::BignumCalc& op, const std::optional<component::Bignum
         case    CF_CALCOP("IsEq(A,B)"):
             BignumCalc::AssertBinary(*result, "IsEq");
             break;
+        case    CF_CALCOP("IsGt(A,B)"):
+            BignumCalc::AssertBinary(*result, "IsGt");
+            break;
+        case    CF_CALCOP("IsGte(A,B)"):
+            BignumCalc::AssertBinary(*result, "IsGte");
+            break;
+        case    CF_CALCOP("IsLt(A,B)"):
+            BignumCalc::AssertBinary(*result, "IsLt");
+            break;
+        case    CF_CALCOP("IsLte(A,B)"):
+            BignumCalc::AssertBinary(*result, "IsLte");
+            break;
         case    CF_CALCOP("IsEven(A)"):
             BignumCalc::AssertBinary(*result, "IsEven");
             break;
@@ -571,6 +593,14 @@ void test(const operation::BignumCalc& op, const std::optional<component::Bignum
             if ( LargerThan(*result, op.bn0) ) {
                 Abort("Result is larger than input", repository::CalcOpToString(calcOp));
             }
+            break;
+        case    CF_CALCOP("And(A,B)"):
+            AssertNotLargerThan(*result, op.bn0, repository::CalcOpToString(calcOp));
+            AssertNotLargerThan(*result, op.bn1, repository::CalcOpToString(calcOp));
+            break;
+        case    CF_CALCOP("Or(A,B)"):
+            AssertNotSmallerThan(*result, op.bn0, repository::CalcOpToString(calcOp));
+            AssertNotSmallerThan(*result, op.bn1, repository::CalcOpToString(calcOp));
             break;
     }
 }
